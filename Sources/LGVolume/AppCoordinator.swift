@@ -1,0 +1,253 @@
+import AppKit
+
+final class AppCoordinator {
+    private let settings = AppSettings()
+    private let webOSClient = WebOSClient()
+    private lazy var statusBarController = StatusBarController(coordinator: self)
+    private lazy var volumePanelController = VolumePanelController(coordinator: self)
+    private lazy var settingsWindowController = SettingsWindowController(settings: settings, coordinator: self)
+    private lazy var keyboardVolumeMonitor = KeyboardVolumeMonitor(
+        onVolumeDown: { [weak self] in self?.adjustVolumeByKeyboard(delta: -1) },
+        onVolumeUp: { [weak self] in self?.adjustVolumeByKeyboard(delta: 1) },
+        onMute: { [weak self] in self?.toggleMuteFromPanel() }
+    )
+
+    var isMuted: Bool { settings.muted }
+    var isConnected: Bool { webOSClient.isConnected }
+    var currentVolume: Int { settings.volume }
+    var currentTVIP: String { settings.tvIP }
+
+    private(set) var status = "未连接" {
+        didSet {
+            statusBarController.refresh()
+            settingsWindowController.updateStatus(status)
+        }
+    }
+
+    func start() {
+        applyAppearance()
+        statusBarController.refresh()
+        keyboardVolumeMonitor.start()
+        if !settings.tvIP.isEmpty {
+            connect(showPairingPrompt: false)
+        } else {
+            discoverTV()
+        }
+    }
+
+    func showVolumePanel(anchor: NSStatusBarButton) {
+        volumePanelController.toggle(
+            anchor: anchor,
+            title: settings.tvName,
+            volume: settings.volume,
+            muted: settings.muted,
+            hdmiNames: settings.hdmiNames
+        )
+        refreshVolume()
+    }
+
+    func showSettings() {
+        settingsWindowController.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindowController.refresh()
+    }
+
+    func quit() {
+        NSApp.terminate(nil)
+    }
+
+    func discoverTV() {
+        status = "正在扫描 LG webOS 电视..."
+        DiscoveryService().scan { [weak self] devices in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.settingsWindowController.updateDevices(devices)
+                if let first = devices.first {
+                    self.status = "已发现 \(first.name)（\(first.ip)），请选择“使用”或手动填写 IP。"
+                    self.settingsWindowController.refresh()
+                } else {
+                    self.status = "未发现电视，请确认 Mac 和 LG C2 在同一局域网，或手动填写 IP。"
+                }
+            }
+        }
+    }
+
+    func saveManualSettings(ip: String, name: String) {
+        settings.tvIP = ip
+        settings.tvName = name.isEmpty ? "LG TV" : name
+        status = settings.tvIP.isEmpty ? "请填写 LG C2 IP" : "已保存 \(settings.tvIP)"
+    }
+
+    func saveHDMINames(_ names: [String]) {
+        for (offset, name) in names.enumerated() {
+            settings.setHDMIName(name, index: offset + 1)
+        }
+        volumePanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+        status = "已保存 HDMI 名称"
+        settingsWindowController.refresh()
+    }
+
+    func pair() {
+        settings.clearClientKey()
+        connect(showPairingPrompt: true)
+    }
+
+    func disconnect() {
+        webOSClient.disconnect()
+        status = "已断开"
+        settingsWindowController.refresh()
+    }
+
+    func setAppearanceMode(_ mode: String) {
+        settings.appearanceMode = mode
+        applyAppearance()
+        volumePanelController.refreshAppearance()
+        settingsWindowController.refresh()
+    }
+
+    func refreshVolume() {
+        guard webOSClient.isConnected else {
+            connect(showPairingPrompt: false)
+            return
+        }
+        webOSClient.getVolume { [weak self] result in
+            DispatchQueue.main.async {
+                self?.handleVolumeResult(result)
+            }
+        }
+    }
+
+    func setVolumeFromPanel(_ volume: Int) {
+        let previousVolume = settings.volume
+        let delta = volume - previousVolume
+        settings.volume = volume
+        settings.muted = false
+        volumePanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+        volumePanelController.showFeedback(delta: delta)
+
+        ensureConnectedThen { [weak self] in
+            guard let self else { return }
+            self.webOSClient.changeVolume(delta: delta) { stepResult in
+                DispatchQueue.main.async {
+                    switch stepResult {
+                    case .success:
+                        self.handleCommandResult(.success(()), success: "音量已调整到 \(volume)%")
+                        self.refreshVolume()
+                    case .failure:
+                        self.webOSClient.setVolume(volume) { setResult in
+                            DispatchQueue.main.async {
+                                self.handleCommandResult(setResult, success: "音量已设为 \(volume)%")
+                                self.refreshVolume()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func toggleMuteFromPanel() {
+        settings.muted.toggle()
+        volumePanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+        statusBarController.refresh()
+
+        ensureConnectedThen { [weak self] in
+            guard let self else { return }
+            self.webOSClient.setMuted(self.settings.muted) { result in
+                DispatchQueue.main.async {
+                    self.handleCommandResult(result, success: self.settings.muted ? "已静音" : "已取消静音")
+                }
+            }
+        }
+    }
+
+    func switchHDMIFromPanel(index: Int) {
+        ensureConnectedThen { [weak self] in
+            guard let self else { return }
+            self.webOSClient.switchHDMI(index) { result in
+                DispatchQueue.main.async {
+                    let name = self.settings.hdmiName(index)
+                    self.handleCommandResult(result, success: "已切换到 \(name)")
+                }
+            }
+        }
+    }
+
+    private func connect(showPairingPrompt: Bool) {
+        guard !settings.tvIP.isEmpty else {
+            status = "请先扫描或填写 LG C2 IP"
+            showSettings()
+            return
+        }
+
+        status = showPairingPrompt ? "正在连接，请在电视上允许配对..." : "正在连接 \(settings.tvIP)..."
+        webOSClient.connect(ip: settings.tvIP, clientKey: settings.clientKey, forcePairing: showPairingPrompt) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let clientKey):
+                    self.settings.clientKey = clientKey
+                    self.status = "已连接 \(self.settings.tvName)"
+                    self.refreshVolume()
+                case .failure(let message):
+                    self.status = message
+                    self.settingsWindowController.updateOutput(message)
+                }
+            }
+        }
+    }
+
+    private func ensureConnectedThen(_ action: @escaping () -> Void) {
+        if webOSClient.isConnected {
+            action()
+            return
+        }
+
+        connect(showPairingPrompt: settings.clientKey.isEmpty)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            if self.webOSClient.isConnected {
+                action()
+            }
+        }
+    }
+
+    private func handleVolumeResult(_ result: LGResult<TVVolumeStatus>) {
+        switch result {
+        case .success(let volumeStatus):
+            settings.volume = volumeStatus.volume
+            settings.muted = volumeStatus.muted
+            status = "已同步音量 \(volumeStatus.volume)%"
+            volumePanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+            settingsWindowController.updateOutput("volume=\(volumeStatus.volume), muted=\(volumeStatus.muted)")
+        case .failure(let message):
+            status = message
+            settingsWindowController.updateOutput(message)
+        }
+    }
+
+    private func handleCommandResult(_ result: LGResult<Void>, success: String) {
+        switch result {
+        case .success:
+            status = success
+        case .failure(let message):
+            status = message
+            settingsWindowController.updateOutput(message)
+        }
+    }
+
+    private func adjustVolumeByKeyboard(delta: Int) {
+        let target = min(max(settings.volume + delta, 0), 100)
+        setVolumeFromPanel(target)
+    }
+
+    private func applyAppearance() {
+        switch settings.appearanceMode {
+        case "light":
+            NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark":
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        default:
+            NSApp.appearance = nil
+        }
+    }
+}
