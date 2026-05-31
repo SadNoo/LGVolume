@@ -25,6 +25,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var menuVolume = 50
     @Published private(set) var menuMuted = false
     @Published private(set) var menuHDMINames = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"]
+    @Published private(set) var selectedHDMIIndex: Int?
 
     var isMuted: Bool { menuMuted }
     var isConnected: Bool { webOSClient.isConnected }
@@ -106,6 +107,7 @@ final class AppCoordinator: ObservableObject {
 
     func disconnect() {
         webOSClient.disconnect()
+        selectedHDMIIndex = nil
         status = "已断开"
         settingsWindowController.refresh()
     }
@@ -198,6 +200,9 @@ final class AppCoordinator: ObservableObject {
             self.webOSClient.switchHDMI(index) { result in
                 DispatchQueue.main.async {
                     let name = self.settings.hdmiName(index)
+                    if case .success = result {
+                        self.selectedHDMIIndex = index
+                    }
                     self.handleCommandResult(result, success: "已切换到 \(name)")
                 }
             }
@@ -221,6 +226,7 @@ final class AppCoordinator: ObservableObject {
                     self.status = "已连接 \(self.settings.tvName)"
                     self.refreshVolume()
                 case .failure(let message):
+                    self.selectedHDMIIndex = nil
                     self.status = message
                     self.settingsWindowController.updateOutput(message)
                 }
