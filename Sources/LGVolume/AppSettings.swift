@@ -13,6 +13,7 @@ final class AppSettings {
         static let hdmiShortcutPrefix = "hdmiShortcut"
         static let appearanceMode = "appearanceMode"
         static let launchAtLogin = "launchAtLogin"
+        static let accessibilityPromptShown = "accessibilityPromptShown"
     }
 
     var tvIP: String {
@@ -64,9 +65,9 @@ final class AppSettings {
 
     func hdmiShortcut(_ index: Int) -> KeyboardShortcut? {
         guard let raw = defaults.string(forKey: "\(Key.hdmiShortcutPrefix)\(index)") else {
-            return nil
+            return KeyboardShortcut.defaultHDMIShortcut(index: index)
         }
-        return KeyboardShortcut(storageValue: raw)
+        return KeyboardShortcut(storageValue: raw) ?? KeyboardShortcut.defaultHDMIShortcut(index: index)
     }
 
     func setHDMIShortcut(_ shortcut: KeyboardShortcut?, index: Int) {
@@ -99,5 +100,10 @@ final class AppSettings {
     var launchAtLogin: Bool {
         get { defaults.bool(forKey: Key.launchAtLogin) }
         set { defaults.set(newValue, forKey: Key.launchAtLogin) }
+    }
+
+    var accessibilityPromptShown: Bool {
+        get { defaults.bool(forKey: Key.accessibilityPromptShown) }
+        set { defaults.set(newValue, forKey: Key.accessibilityPromptShown) }
     }
 }

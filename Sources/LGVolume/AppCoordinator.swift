@@ -1,54 +1,51 @@
 import AppKit
+import Combine
 import ServiceManagement
 
-final class AppCoordinator {
+final class AppCoordinator: ObservableObject {
     private let settings = AppSettings()
     private let webOSClient = WebOSClient()
-    private lazy var statusBarController = StatusBarController(coordinator: self)
-    private lazy var controlPanelController = ControlPanelController(coordinator: self)
     private lazy var settingsWindowController = SettingsWindowController(settings: settings, coordinator: self)
     private lazy var keyboardVolumeMonitor = KeyboardVolumeMonitor(
-        onVolumeDown: { [weak self] in self?.adjustVolumeByKeyboard(delta: -1) },
-        onVolumeUp: { [weak self] in self?.adjustVolumeByKeyboard(delta: 1) },
-        onMute: { [weak self] in self?.toggleMuteFromPanel() },
+        onVolumeDown: { [weak self] in DispatchQueue.main.async { self?.adjustVolumeByKeyboard(delta: -1) } },
+        onVolumeUp: { [weak self] in DispatchQueue.main.async { self?.adjustVolumeByKeyboard(delta: 1) } },
+        onMute: { [weak self] in DispatchQueue.main.async { self?.toggleMuteFromPanel() } },
         hdmiShortcuts: { [weak self] in self?.settings.hdmiShortcuts ?? [] },
-        onHDMIShortcut: { [weak self] index in self?.switchHDMIFromPanel(index: index) }
+        onHDMIShortcut: { [weak self] index in DispatchQueue.main.async { self?.switchHDMIFromPanel(index: index) } },
+        shouldPromptForAccessibility: { [weak self] in self?.settings.accessibilityPromptShown == false },
+        markAccessibilityPromptShown: { [weak self] in self?.settings.accessibilityPromptShown = true }
     )
 
-    var isMuted: Bool { settings.muted }
+    @Published private(set) var status = "未连接" {
+        didSet {
+            settingsWindowController.updateStatus(status)
+        }
+    }
+    @Published private(set) var menuTitle = "LG TV"
+    @Published private(set) var menuVolume = 50
+    @Published private(set) var menuMuted = false
+    @Published private(set) var menuHDMINames = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"]
+
+    var isMuted: Bool { menuMuted }
     var isConnected: Bool { webOSClient.isConnected }
-    var currentVolume: Int { settings.volume }
+    var currentVolume: Int { menuVolume }
     var currentTVIP: String { settings.tvIP }
     var launchAtLogin: Bool { settings.launchAtLogin }
     var hdmiShortcuts: [KeyboardShortcut?] { settings.hdmiShortcuts }
 
-    private(set) var status = "未连接" {
-        didSet {
-            statusBarController.refresh()
-            settingsWindowController.updateStatus(status)
-        }
+    init() {
+        syncMenuState()
     }
 
     func start() {
         applyAppearance()
-        statusBarController.refresh()
+        syncMenuState()
         keyboardVolumeMonitor.start()
         if !settings.tvIP.isEmpty {
             connect(showPairingPrompt: false)
         } else {
             discoverTV()
         }
-    }
-
-    func showControlPanel(anchor: NSStatusBarButton) {
-        controlPanelController.toggle(
-            anchor: anchor,
-            title: settings.tvName,
-            volume: settings.volume,
-            muted: settings.muted,
-            hdmiNames: settings.hdmiNames
-        )
-        refreshVolume()
     }
 
     func showSettings() {
@@ -80,6 +77,7 @@ final class AppCoordinator {
     func saveManualSettings(ip: String, name: String) {
         settings.tvIP = ip
         settings.tvName = name.isEmpty ? "LG TV" : name
+        syncMenuState()
         status = settings.tvIP.isEmpty ? "请填写 LG C2 IP" : "已保存 \(settings.tvIP)"
     }
 
@@ -87,7 +85,7 @@ final class AppCoordinator {
         for (offset, name) in names.enumerated() {
             settings.setHDMIName(name, index: offset + 1)
         }
-        controlPanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+        syncMenuState()
         status = "已保存 HDMI 名称"
         settingsWindowController.refresh()
     }
@@ -96,6 +94,7 @@ final class AppCoordinator {
         for (offset, shortcut) in shortcuts.enumerated() {
             settings.setHDMIShortcut(shortcut, index: offset + 1)
         }
+        keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
         status = "已保存 HDMI 快捷键"
         settingsWindowController.refresh()
     }
@@ -114,7 +113,7 @@ final class AppCoordinator {
     func setAppearanceMode(_ mode: String) {
         settings.appearanceMode = mode
         applyAppearance()
-        controlPanelController.refreshAppearance()
+        syncMenuState()
         settingsWindowController.refresh()
     }
 
@@ -156,7 +155,7 @@ final class AppCoordinator {
         let delta = volume - previousVolume
         settings.volume = volume
         settings.muted = false
-        controlPanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+        syncMenuState()
 
         ensureConnectedThen { [weak self] in
             guard let self else { return }
@@ -181,8 +180,7 @@ final class AppCoordinator {
 
     func toggleMuteFromPanel() {
         settings.muted.toggle()
-        controlPanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
-        statusBarController.refresh()
+        syncMenuState()
 
         ensureConnectedThen { [weak self] in
             guard let self else { return }
@@ -250,7 +248,7 @@ final class AppCoordinator {
             settings.volume = volumeStatus.volume
             settings.muted = volumeStatus.muted
             status = "已同步音量 \(volumeStatus.volume)%"
-            controlPanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+            syncMenuState()
             settingsWindowController.updateOutput("volume=\(volumeStatus.volume), muted=\(volumeStatus.muted)")
         case .failure(let message):
             status = message
@@ -286,5 +284,12 @@ final class AppCoordinator {
         default:
             NSApp.appearance = nil
         }
+    }
+
+    private func syncMenuState() {
+        menuTitle = settings.tvName
+        menuVolume = settings.volume
+        menuMuted = settings.muted
+        menuHDMINames = settings.hdmiNames
     }
 }

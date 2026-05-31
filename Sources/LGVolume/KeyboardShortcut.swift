@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 struct KeyboardShortcut: Equatable {
     let keyCode: UInt16
@@ -38,6 +39,27 @@ struct KeyboardShortcut: Equatable {
 
     func matches(_ event: NSEvent) -> Bool {
         event.keyCode == keyCode && event.modifierFlags.intersection(Self.allowedModifiers) == modifiers
+    }
+
+    var carbonModifiers: UInt32 {
+        var value: UInt32 = 0
+        if modifiers.contains(.command) { value |= UInt32(cmdKey) }
+        if modifiers.contains(.option) { value |= UInt32(optionKey) }
+        if modifiers.contains(.control) { value |= UInt32(controlKey) }
+        if modifiers.contains(.shift) { value |= UInt32(shiftKey) }
+        return value
+    }
+
+    static func defaultHDMIShortcut(index: Int) -> KeyboardShortcut? {
+        let keyCodes: [UInt16] = [123, 126, 125, 124]
+        guard (1...4).contains(index) else {
+            return nil
+        }
+
+        let keyCode = keyCodes[index - 1]
+        let modifiers: NSEvent.ModifierFlags = [.control, .option, .command]
+        let key = specialKeyName(keyCode) ?? ""
+        return KeyboardShortcut(keyCode: keyCode, modifiers: modifiers, display: display(modifiers: modifiers, key: key))
     }
 
     private static let allowedModifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
@@ -117,6 +139,15 @@ final class ShortcutRecorderField: NSTextField {
     }
 
     override func keyDown(with event: NSEvent) {
+        capture(event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        capture(event)
+        return true
+    }
+
+    private func capture(_ event: NSEvent) {
         if event.keyCode == 53 || event.keyCode == 51 || event.keyCode == 117 {
             shortcut = nil
             placeholderString = "未设置"
