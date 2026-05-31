@@ -10,7 +10,9 @@ final class AppSettings {
         static let volume = "volume"
         static let muted = "muted"
         static let hdmiNamePrefix = "hdmiName"
+        static let hdmiShortcutPrefix = "hdmiShortcut"
         static let appearanceMode = "appearanceMode"
+        static let launchAtLogin = "launchAtLogin"
     }
 
     var tvIP: String {
@@ -60,6 +62,26 @@ final class AppSettings {
         (1...4).map { hdmiName($0) }
     }
 
+    func hdmiShortcut(_ index: Int) -> KeyboardShortcut? {
+        guard let raw = defaults.string(forKey: "\(Key.hdmiShortcutPrefix)\(index)") else {
+            return nil
+        }
+        return KeyboardShortcut(storageValue: raw)
+    }
+
+    func setHDMIShortcut(_ shortcut: KeyboardShortcut?, index: Int) {
+        let key = "\(Key.hdmiShortcutPrefix)\(index)"
+        if let shortcut {
+            defaults.set(shortcut.storageValue, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    var hdmiShortcuts: [KeyboardShortcut?] {
+        (1...4).map { hdmiShortcut($0) }
+    }
+
     func clearClientKey() {
         defaults.removeObject(forKey: Key.clientKey)
     }
@@ -72,5 +94,10 @@ final class AppSettings {
         set {
             defaults.set(newValue, forKey: Key.appearanceMode)
         }
+    }
+
+    var launchAtLogin: Bool {
+        get { defaults.bool(forKey: Key.launchAtLogin) }
+        set { defaults.set(newValue, forKey: Key.launchAtLogin) }
     }
 }

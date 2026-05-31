@@ -11,13 +11,13 @@ final class StatusBarController: NSObject {
     }
 
     func refresh() {
-        statusItem.button?.toolTip = coordinator?.status ?? "LGVolumeHDMI"
+        statusItem.button?.toolTip = coordinator?.status ?? "LGVolume"
         let symbolName = coordinator?.isMuted == true ? "speaker.slash.fill" : "speaker.wave.2.fill"
-        statusItem.button?.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "LGVolumeHDMI")
+        statusItem.button?.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "LGVolume")
     }
 
     private func configure() {
-        statusItem.button?.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "LGVolumeHDMI")
+        statusItem.button?.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "LGVolume")
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.target = self
         statusItem.button?.action = #selector(clicked)
@@ -26,11 +26,7 @@ final class StatusBarController: NSObject {
 
     @objc private func clicked() {
         guard let button = statusItem.button else { return }
-        if NSApp.currentEvent?.type == .rightMouseUp {
-            showMenu(from: button)
-        } else {
-            coordinator?.showVolumePanel(anchor: button)
-        }
+        coordinator?.showControlPanel(anchor: button)
     }
 
     @objc private func settings() {

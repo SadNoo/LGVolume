@@ -18,6 +18,11 @@ final class WebOSClient: NSObject {
     func connect(ip: String, clientKey: String, forcePairing: Bool, completion: @escaping (LGResult<String>) -> Void) {
         disconnect()
 
+        guard Self.isLocalNetworkIPv4(ip) else {
+            completion(.failure("为保护隐私，LGVolume 仅允许连接局域网 IPv4 地址（例如 192.168.x.x、10.x.x.x 或 172.16-31.x.x）。"))
+            return
+        }
+
         let urls = [
             URL(string: "wss://\(ip):3001"),
             URL(string: "ws://\(ip):3000")
@@ -50,7 +55,11 @@ final class WebOSClient: NSObject {
         let url = urls[index]
         disconnect(keepCallbacks: true)
         completionCalled = false
-        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = false
+        configuration.allowsConstrainedNetworkAccess = true
+        configuration.allowsExpensiveNetworkAccess = true
+        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: url)
         self.session = session
         self.webSocket = task
@@ -333,6 +342,26 @@ final class WebOSClient: NSObject {
                 ]
             ]
         ]
+    }
+
+    private static func isLocalNetworkIPv4(_ ip: String) -> Bool {
+        let parts = ip.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else {
+            return false
+        }
+        if parts[0] == 10 {
+            return true
+        }
+        if parts[0] == 172 && (16...31).contains(parts[1]) {
+            return true
+        }
+        if parts[0] == 192 && parts[1] == 168 {
+            return true
+        }
+        if parts[0] == 169 && parts[1] == 254 {
+            return true
+        }
+        return false
     }
 }
 

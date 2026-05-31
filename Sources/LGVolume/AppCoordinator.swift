@@ -1,21 +1,26 @@
 import AppKit
+import ServiceManagement
 
 final class AppCoordinator {
     private let settings = AppSettings()
     private let webOSClient = WebOSClient()
     private lazy var statusBarController = StatusBarController(coordinator: self)
-    private lazy var volumePanelController = VolumePanelController(coordinator: self)
+    private lazy var controlPanelController = ControlPanelController(coordinator: self)
     private lazy var settingsWindowController = SettingsWindowController(settings: settings, coordinator: self)
     private lazy var keyboardVolumeMonitor = KeyboardVolumeMonitor(
         onVolumeDown: { [weak self] in self?.adjustVolumeByKeyboard(delta: -1) },
         onVolumeUp: { [weak self] in self?.adjustVolumeByKeyboard(delta: 1) },
-        onMute: { [weak self] in self?.toggleMuteFromPanel() }
+        onMute: { [weak self] in self?.toggleMuteFromPanel() },
+        hdmiShortcuts: { [weak self] in self?.settings.hdmiShortcuts ?? [] },
+        onHDMIShortcut: { [weak self] index in self?.switchHDMIFromPanel(index: index) }
     )
 
     var isMuted: Bool { settings.muted }
     var isConnected: Bool { webOSClient.isConnected }
     var currentVolume: Int { settings.volume }
     var currentTVIP: String { settings.tvIP }
+    var launchAtLogin: Bool { settings.launchAtLogin }
+    var hdmiShortcuts: [KeyboardShortcut?] { settings.hdmiShortcuts }
 
     private(set) var status = "未连接" {
         didSet {
@@ -35,8 +40,8 @@ final class AppCoordinator {
         }
     }
 
-    func showVolumePanel(anchor: NSStatusBarButton) {
-        volumePanelController.toggle(
+    func showControlPanel(anchor: NSStatusBarButton) {
+        controlPanelController.toggle(
             anchor: anchor,
             title: settings.tvName,
             volume: settings.volume,
@@ -82,8 +87,16 @@ final class AppCoordinator {
         for (offset, name) in names.enumerated() {
             settings.setHDMIName(name, index: offset + 1)
         }
-        volumePanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+        controlPanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
         status = "已保存 HDMI 名称"
+        settingsWindowController.refresh()
+    }
+
+    func saveHDMIShortcuts(_ shortcuts: [KeyboardShortcut?]) {
+        for (offset, shortcut) in shortcuts.enumerated() {
+            settings.setHDMIShortcut(shortcut, index: offset + 1)
+        }
+        status = "已保存 HDMI 快捷键"
         settingsWindowController.refresh()
     }
 
@@ -101,7 +114,28 @@ final class AppCoordinator {
     func setAppearanceMode(_ mode: String) {
         settings.appearanceMode = mode
         applyAppearance()
-        volumePanelController.refreshAppearance()
+        controlPanelController.refreshAppearance()
+        settingsWindowController.refresh()
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        settings.launchAtLogin = enabled
+        do {
+            if enabled {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+                status = "已开启随开机启动"
+            } else {
+                if SMAppService.mainApp.status == .enabled {
+                    try SMAppService.mainApp.unregister()
+                }
+                status = "已关闭随开机启动"
+            }
+        } catch {
+            settings.launchAtLogin = SMAppService.mainApp.status == .enabled
+            status = "开机启动设置失败：\(error.localizedDescription)"
+        }
         settingsWindowController.refresh()
     }
 
@@ -122,8 +156,7 @@ final class AppCoordinator {
         let delta = volume - previousVolume
         settings.volume = volume
         settings.muted = false
-        volumePanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
-        volumePanelController.showFeedback(delta: delta)
+        controlPanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
 
         ensureConnectedThen { [weak self] in
             guard let self else { return }
@@ -148,7 +181,7 @@ final class AppCoordinator {
 
     func toggleMuteFromPanel() {
         settings.muted.toggle()
-        volumePanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+        controlPanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
         statusBarController.refresh()
 
         ensureConnectedThen { [weak self] in
@@ -217,7 +250,7 @@ final class AppCoordinator {
             settings.volume = volumeStatus.volume
             settings.muted = volumeStatus.muted
             status = "已同步音量 \(volumeStatus.volume)%"
-            volumePanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
+            controlPanelController.update(title: settings.tvName, volume: settings.volume, muted: settings.muted, hdmiNames: settings.hdmiNames)
             settingsWindowController.updateOutput("volume=\(volumeStatus.volume), muted=\(volumeStatus.muted)")
         case .failure(let message):
             status = message
@@ -236,6 +269,10 @@ final class AppCoordinator {
     }
 
     private func adjustVolumeByKeyboard(delta: Int) {
+        adjustVolumeFromPanel(delta: delta)
+    }
+
+    func adjustVolumeFromPanel(delta: Int) {
         let target = min(max(settings.volume + delta, 0), 100)
         setVolumeFromPanel(target)
     }

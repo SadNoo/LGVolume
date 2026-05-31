@@ -7,9 +7,11 @@ final class SettingsWindowController: NSWindowController {
     private let statusLabel = NSTextField(labelWithString: "")
     private let volumeWaveLabel = NSTextField(labelWithString: "")
     private let appearanceControl = NSSegmentedControl(labels: ["自动", "浅色", "深色"], trackingMode: .selectOne, target: nil, action: nil)
+    private let launchAtLoginButton = NSButton(checkboxWithTitle: "登录时自动启动 LGVolume", target: nil, action: nil)
     private let ipField = NSTextField()
     private let nameField = NSTextField()
     private let hdmiNameFields = (0..<4).map { _ in NSTextField() }
+    private let hdmiShortcutFields = (0..<4).map { _ in ShortcutRecorderField() }
     private let connectButton = NSButton(title: "配对/连接", target: nil, action: nil)
     private var devices: [DiscoveredTV] = []
 
@@ -17,7 +19,7 @@ final class SettingsWindowController: NSWindowController {
         self.settings = settings
         self.coordinator = coordinator
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 650),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -38,6 +40,11 @@ final class SettingsWindowController: NSWindowController {
         for (offset, field) in hdmiNameFields.enumerated() {
             field.stringValue = settings.hdmiName(offset + 1)
         }
+        for (offset, field) in hdmiShortcutFields.enumerated() {
+            field.shortcut = settings.hdmiShortcut(offset + 1)
+            field.placeholderString = "未设置"
+        }
+        launchAtLoginButton.state = coordinator?.launchAtLogin == true ? .on : .off
         updateAppearanceSelection()
         updateStatus(coordinator?.status ?? "未连接")
     }
@@ -92,7 +99,7 @@ final class SettingsWindowController: NSWindowController {
         header.edgeInsets = NSEdgeInsets(top: 28, left: 32, bottom: 22, right: 32)
         header.translatesAutoresizingMaskIntoConstraints = false
         header.addArrangedSubview(titleLabel("通用"))
-        let subtitle = label("在这里配置 LG 电视连接、HDMI 输入和全局音量快捷键。")
+        let subtitle = label("在这里配置局域网内的 LG 电视连接、HDMI 输入和全局音量快捷键。")
         subtitle.textColor = .secondaryLabelColor
         header.addArrangedSubview(subtitle)
         root.addArrangedSubview(header)
@@ -154,6 +161,13 @@ final class SettingsWindowController: NSWindowController {
         appearanceRow.addArrangedSubview(appearanceControl)
         form.addArrangedSubview(appearanceRow)
 
+        let loginRow = row()
+        loginRow.addArrangedSubview(fixedLabel("启动："))
+        launchAtLoginButton.target = self
+        launchAtLoginButton.action = #selector(changeLaunchAtLogin)
+        loginRow.addArrangedSubview(launchAtLoginButton)
+        form.addArrangedSubview(loginRow)
+
         let ipRow = row()
         ipRow.addArrangedSubview(fixedLabel("LG C2 IP："))
         ipField.placeholderString = "例如：192.168.1.23"
@@ -188,6 +202,19 @@ final class SettingsWindowController: NSWindowController {
         shortcuts.textColor = .secondaryLabelColor
         form.addArrangedSubview(shortcuts)
 
+        let hdmiShortcutGrid = NSGridView(views: [
+            [fixedLabel("HDMI1 快捷键："), hdmiShortcutFields[0], fixedLabel("HDMI2 快捷键："), hdmiShortcutFields[1]],
+            [fixedLabel("HDMI3 快捷键："), hdmiShortcutFields[2], fixedLabel("HDMI4 快捷键："), hdmiShortcutFields[3]]
+        ])
+        hdmiShortcutGrid.rowSpacing = 10
+        hdmiShortcutGrid.columnSpacing = 12
+        for field in hdmiShortcutFields {
+            field.placeholderString = "未设置"
+            field.alignment = .center
+            field.widthAnchor.constraint(equalToConstant: 165).isActive = true
+        }
+        form.addArrangedSubview(hdmiShortcutGrid)
+
         let actionRow = row()
         actionRow.addArrangedSubview(button("保存", action: #selector(save)))
         connectButton.target = self
@@ -217,7 +244,7 @@ final class SettingsWindowController: NSWindowController {
     private func fixedLabel(_ text: String) -> NSTextField {
         let field = label(text)
         field.alignment = .right
-        field.widthAnchor.constraint(equalToConstant: 112).isActive = true
+        field.widthAnchor.constraint(equalToConstant: 124).isActive = true
         return field
     }
 
@@ -259,9 +286,14 @@ final class SettingsWindowController: NSWindowController {
         coordinator?.setAppearanceMode(modes[index])
     }
 
+    @objc private func changeLaunchAtLogin() {
+        coordinator?.setLaunchAtLogin(launchAtLoginButton.state == .on)
+    }
+
     @objc private func save() {
         coordinator?.saveManualSettings(ip: ipField.stringValue, name: nameField.stringValue)
         coordinator?.saveHDMINames(hdmiNameFields.map(\.stringValue))
+        coordinator?.saveHDMIShortcuts(hdmiShortcutFields.map(\.shortcut))
     }
 
     @objc private func connectOrDisconnect() {

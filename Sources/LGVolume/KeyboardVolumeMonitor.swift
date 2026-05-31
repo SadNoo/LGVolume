@@ -7,11 +7,21 @@ final class KeyboardVolumeMonitor {
     private let onVolumeDown: () -> Void
     private let onVolumeUp: () -> Void
     private let onMute: () -> Void
+    private let hdmiShortcuts: () -> [KeyboardShortcut?]
+    private let onHDMIShortcut: (Int) -> Void
 
-    init(onVolumeDown: @escaping () -> Void, onVolumeUp: @escaping () -> Void, onMute: @escaping () -> Void) {
+    init(
+        onVolumeDown: @escaping () -> Void,
+        onVolumeUp: @escaping () -> Void,
+        onMute: @escaping () -> Void,
+        hdmiShortcuts: @escaping () -> [KeyboardShortcut?],
+        onHDMIShortcut: @escaping (Int) -> Void
+    ) {
         self.onVolumeDown = onVolumeDown
         self.onVolumeUp = onVolumeUp
         self.onMute = onMute
+        self.hdmiShortcuts = hdmiShortcuts
+        self.onHDMIShortcut = onHDMIShortcut
     }
 
     func start() {
@@ -32,6 +42,14 @@ final class KeyboardVolumeMonitor {
     private func handle(_ event: NSEvent) -> Bool {
         if event.type == .systemDefined {
             return handleMediaKey(event)
+        }
+
+        for (offset, shortcut) in hdmiShortcuts().enumerated() {
+            guard let shortcut, shortcut.matches(event) else {
+                continue
+            }
+            onHDMIShortcut(offset + 1)
+            return true
         }
 
         switch event.keyCode {
