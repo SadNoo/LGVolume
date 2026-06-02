@@ -85,7 +85,7 @@ final class AppCoordinator: ObservableObject {
         settings.tvIP = ip
         settings.tvName = name.isEmpty ? "LG TV" : name
         syncMenuState()
-        status = settings.tvIP.isEmpty ? text(.currentDisconnected) : "\(text(.save)) \(settings.tvIP)"
+        status = text(.saveSuccess)
     }
 
     func saveHDMINames(_ names: [String]) {
@@ -93,7 +93,7 @@ final class AppCoordinator: ObservableObject {
             settings.setHDMIName(name, index: offset + 1)
         }
         syncMenuState()
-        status = text(.save)
+        status = text(.saveSuccess)
         settingsWindowController.refresh()
     }
 
@@ -102,7 +102,14 @@ final class AppCoordinator: ObservableObject {
             settings.setHDMIShortcut(shortcut, index: offset + 1)
         }
         keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
-        status = text(.save)
+        status = text(.saveSuccess)
+        settingsWindowController.refresh()
+    }
+
+    func restoreDefaultHDMIShortcuts() {
+        settings.resetHDMIShortcuts()
+        keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
+        status = text(.saveSuccess)
         settingsWindowController.refresh()
     }
 

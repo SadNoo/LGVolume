@@ -32,7 +32,9 @@ enum L10n {
         case notSet
         case pairConnect
         case quit
+        case restoreHDMIShortcuts
         case save
+        case saveSuccess
         case scanNetwork
         case settings
         case shortcutsSummary
@@ -102,7 +104,9 @@ enum L10n {
         .notSet: "未设置",
         .pairConnect: "配对/连接",
         .quit: "退出",
+        .restoreHDMIShortcuts: "恢复 HDMI 快捷键",
         .save: "保存",
+        .saveSuccess: "保存成功",
         .scanNetwork: "正在扫描 LG webOS 电视...",
         .settings: "设置",
         .shortcutsSummary: "快捷键：F10 静音 / F11 减小音量 / F12 增加音量",
@@ -145,7 +149,9 @@ enum L10n {
         .notSet: "Not set",
         .pairConnect: "Pair / Connect",
         .quit: "Quit",
+        .restoreHDMIShortcuts: "Restore HDMI Shortcuts",
         .save: "Save",
+        .saveSuccess: "Saved",
         .scanNetwork: "Scanning for LG webOS TV...",
         .settings: "Settings",
         .shortcutsSummary: "Shortcuts: F10 mute / F11 volume down / F12 volume up",
@@ -188,7 +194,9 @@ enum L10n {
         .notSet: "未設定",
         .pairConnect: "ペアリング / 接続",
         .quit: "終了",
+        .restoreHDMIShortcuts: "HDMI ショートカットを復元",
         .save: "保存",
+        .saveSuccess: "保存しました",
         .scanNetwork: "LG webOS TV をスキャン中...",
         .settings: "設定",
         .shortcutsSummary: "ショートカット：F10 ミュート / F11 音量ダウン / F12 音量アップ",

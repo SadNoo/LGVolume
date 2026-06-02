@@ -80,6 +80,12 @@ final class AppSettings {
         }
     }
 
+    func resetHDMIShortcuts() {
+        for index in 1...4 {
+            defaults.removeObject(forKey: "\(Key.hdmiShortcutPrefix)\(index)")
+        }
+    }
+
     var hdmiShortcuts: [KeyboardShortcut?] {
         (1...4).map { hdmiShortcut($0) }
     }

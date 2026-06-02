@@ -17,6 +17,7 @@ final class SettingsWindowController: NSWindowController {
     private let connectButton = NSButton(title: "配对/连接", target: nil, action: nil)
     private let saveButton = NSButton(title: "", target: nil, action: nil)
     private let syncVolumeButton = NSButton(title: "", target: nil, action: nil)
+    private let restoreHDMIShortcutsButton = NSButton(title: "", target: nil, action: nil)
     private var devices: [DiscoveredTV] = []
 
     init(settings: AppSettings, coordinator: AppCoordinator) {
@@ -74,6 +75,7 @@ final class SettingsWindowController: NSWindowController {
         ipField.placeholderString = t(.inputIP)
         saveButton.title = t(.save)
         syncVolumeButton.title = t(.syncVolume)
+        restoreHDMIShortcutsButton.title = t(.restoreHDMIShortcuts)
 
         for field in hdmiShortcutFields {
             field.placeholderString = t(.notSet)
@@ -208,7 +210,7 @@ final class SettingsWindowController: NSWindowController {
         form.addArrangedSubview(loginRow)
 
         let ipRow = row()
-        ipRow.addArrangedSubview(fixedLabel("LG C2 IP:"))
+        ipRow.addArrangedSubview(fixedLabel("LG TV IP:"))
         ipField.placeholderString = t(.inputIP)
         ipField.widthAnchor.constraint(equalToConstant: 390).isActive = true
         ipRow.addArrangedSubview(ipField)
@@ -253,6 +255,14 @@ final class SettingsWindowController: NSWindowController {
             field.widthAnchor.constraint(equalToConstant: 165).isActive = true
         }
         form.addArrangedSubview(hdmiShortcutGrid)
+
+        let restoreShortcutRow = row()
+        restoreShortcutRow.addArrangedSubview(fixedLabel(""))
+        restoreHDMIShortcutsButton.target = self
+        restoreHDMIShortcutsButton.action = #selector(restoreHDMIShortcuts)
+        restoreHDMIShortcutsButton.bezelStyle = .rounded
+        restoreShortcutRow.addArrangedSubview(restoreHDMIShortcutsButton)
+        form.addArrangedSubview(restoreShortcutRow)
 
         let actionRow = row()
         saveButton.target = self
@@ -377,6 +387,13 @@ final class SettingsWindowController: NSWindowController {
         coordinator?.saveManualSettings(ip: ipField.stringValue, name: nameField.stringValue)
         coordinator?.saveHDMINames(hdmiNameFields.map(\.stringValue))
         coordinator?.saveHDMIShortcuts(hdmiShortcutFields.map(\.shortcut))
+    }
+
+    @objc private func restoreHDMIShortcuts() {
+        coordinator?.restoreDefaultHDMIShortcuts()
+        for (offset, field) in hdmiShortcutFields.enumerated() {
+            field.shortcut = settings.hdmiShortcut(offset + 1)
+        }
     }
 
     @objc private func connectOrDisconnect() {
