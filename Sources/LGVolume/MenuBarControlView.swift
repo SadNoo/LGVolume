@@ -40,7 +40,7 @@ struct MenuBarControlView: View {
                     Circle()
                         .stroke(Color.white.opacity(0.42), lineWidth: 0.8)
                 }
-                .accessibilityLabel(coordinator.isConnected ? "已连接" : "未连接")
+                .accessibilityLabel(coordinator.isConnected ? coordinator.text(.connected) : coordinator.text(.currentDisconnected))
 
             Spacer(minLength: 8)
         }
@@ -57,9 +57,9 @@ struct MenuBarControlView: View {
                         .frame(width: 22, height: 24)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(coordinator.menuMuted ? "取消静音" : "静音")
+                .accessibilityLabel(coordinator.menuMuted ? coordinator.text(.turnMuteOff) : coordinator.text(.turnMuteOn))
 
-                Text("音量")
+                Text(coordinator.text(.volume))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
 
@@ -113,7 +113,7 @@ struct MenuBarControlView: View {
             Button {
                 coordinator.showSettings()
             } label: {
-                FooterActionLabel(title: "设置")
+                FooterActionLabel(title: coordinator.text(.settings))
             }
             .buttonStyle(.plain)
             .keyboardShortcut(",", modifiers: .command)
@@ -121,7 +121,7 @@ struct MenuBarControlView: View {
             Button {
                 coordinator.quit()
             } label: {
-                FooterActionLabel(title: "退出")
+                FooterActionLabel(title: coordinator.text(.quit))
             }
             .buttonStyle(.plain)
             .keyboardShortcut("q", modifiers: .command)
@@ -132,7 +132,7 @@ struct MenuBarControlView: View {
         if coordinator.isConnected {
             return coordinator.menuTitle
         }
-        return "当前未连接"
+        return coordinator.text(.currentDisconnected)
     }
 
     private var statusColor: Color {
@@ -141,7 +141,7 @@ struct MenuBarControlView: View {
 
     private var displayVolumeText: String {
         if coordinator.menuMuted {
-            return "静音"
+            return coordinator.text(.muted)
         }
         let value = isSliding ? Int(sliderVolume.rounded()) : coordinator.menuVolume
         return "\(value)%"

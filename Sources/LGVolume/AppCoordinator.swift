@@ -16,7 +16,7 @@ final class AppCoordinator: ObservableObject {
         markAccessibilityPromptShown: { [weak self] in self?.settings.accessibilityPromptShown = true }
     )
 
-    @Published private(set) var status = "未连接" {
+    @Published private(set) var status = "" {
         didSet {
             settingsWindowController.updateStatus(status)
         }
@@ -26,6 +26,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var menuMuted = false
     @Published private(set) var menuHDMINames = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"]
     @Published private(set) var selectedHDMIIndex: Int?
+    @Published private(set) var menuLanguageMode = "auto"
 
     var isMuted: Bool { menuMuted }
     var isConnected: Bool { webOSClient.isConnected }
@@ -35,6 +36,7 @@ final class AppCoordinator: ObservableObject {
     var hdmiShortcuts: [KeyboardShortcut?] { settings.hdmiShortcuts }
 
     init() {
+        status = text(.currentDisconnected)
         syncMenuState()
     }
 
@@ -59,17 +61,21 @@ final class AppCoordinator: ObservableObject {
         NSApp.terminate(nil)
     }
 
+    func text(_ key: L10n.Key) -> String {
+        L10n.text(key, languageMode: settings.languageMode)
+    }
+
     func discoverTV() {
-        status = "正在扫描 LG webOS 电视..."
+        status = text(.scanNetwork)
         DiscoveryService().scan { [weak self] devices in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.settingsWindowController.updateDevices(devices)
                 if let first = devices.first {
-                    self.status = "已发现 \(first.name)（\(first.ip)），请选择“使用”或手动填写 IP。"
+                    self.status = "\(self.text(.connected)) \(first.name) (\(first.ip))"
                     self.settingsWindowController.refresh()
                 } else {
-                    self.status = "未发现电视，请确认 Mac 和 LG C2 在同一局域网，或手动填写 IP。"
+                    self.status = self.text(.currentDisconnected)
                 }
             }
         }
@@ -79,7 +85,7 @@ final class AppCoordinator: ObservableObject {
         settings.tvIP = ip
         settings.tvName = name.isEmpty ? "LG TV" : name
         syncMenuState()
-        status = settings.tvIP.isEmpty ? "请填写 LG C2 IP" : "已保存 \(settings.tvIP)"
+        status = settings.tvIP.isEmpty ? text(.currentDisconnected) : "\(text(.save)) \(settings.tvIP)"
     }
 
     func saveHDMINames(_ names: [String]) {
@@ -87,7 +93,7 @@ final class AppCoordinator: ObservableObject {
             settings.setHDMIName(name, index: offset + 1)
         }
         syncMenuState()
-        status = "已保存 HDMI 名称"
+        status = text(.save)
         settingsWindowController.refresh()
     }
 
@@ -96,7 +102,7 @@ final class AppCoordinator: ObservableObject {
             settings.setHDMIShortcut(shortcut, index: offset + 1)
         }
         keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
-        status = "已保存 HDMI 快捷键"
+        status = text(.save)
         settingsWindowController.refresh()
     }
 
@@ -108,7 +114,7 @@ final class AppCoordinator: ObservableObject {
     func disconnect() {
         webOSClient.disconnect()
         selectedHDMIIndex = nil
-        status = "已断开"
+        status = text(.disconnected)
         settingsWindowController.refresh()
     }
 
@@ -119,6 +125,15 @@ final class AppCoordinator: ObservableObject {
         settingsWindowController.refresh()
     }
 
+    func setLanguageMode(_ mode: String) {
+        settings.languageMode = mode
+        menuLanguageMode = mode
+        status = webOSClient.isConnected ? "\(text(.connected)) \(settings.tvName)" : text(.currentDisconnected)
+        syncMenuState()
+        settingsWindowController.refreshLocalizedText()
+        settingsWindowController.refresh()
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         settings.launchAtLogin = enabled
         do {
@@ -126,16 +141,16 @@ final class AppCoordinator: ObservableObject {
                 if SMAppService.mainApp.status != .enabled {
                     try SMAppService.mainApp.register()
                 }
-                status = "已开启随开机启动"
+                status = text(.save)
             } else {
                 if SMAppService.mainApp.status == .enabled {
                     try SMAppService.mainApp.unregister()
                 }
-                status = "已关闭随开机启动"
+                status = text(.save)
             }
         } catch {
             settings.launchAtLogin = SMAppService.mainApp.status == .enabled
-            status = "开机启动设置失败：\(error.localizedDescription)"
+            status = "\(text(.launch)) \(error.localizedDescription)"
         }
         settingsWindowController.refresh()
     }
@@ -165,12 +180,12 @@ final class AppCoordinator: ObservableObject {
                 DispatchQueue.main.async {
                     switch stepResult {
                     case .success:
-                        self.handleCommandResult(.success(()), success: "音量已调整到 \(volume)%")
+                        self.handleCommandResult(.success(()), success: "\(self.text(.volume)) \(volume)%")
                         self.refreshVolume()
                     case .failure:
                         self.webOSClient.setVolume(volume) { setResult in
                             DispatchQueue.main.async {
-                                self.handleCommandResult(setResult, success: "音量已设为 \(volume)%")
+                                self.handleCommandResult(setResult, success: "\(self.text(.volume)) \(volume)%")
                                 self.refreshVolume()
                             }
                         }
@@ -188,7 +203,7 @@ final class AppCoordinator: ObservableObject {
             guard let self else { return }
             self.webOSClient.setMuted(self.settings.muted) { result in
                 DispatchQueue.main.async {
-                    self.handleCommandResult(result, success: self.settings.muted ? "已静音" : "已取消静音")
+                    self.handleCommandResult(result, success: self.settings.muted ? self.text(.turnMuteOn) : self.text(.turnMuteOff))
                 }
             }
         }
@@ -203,7 +218,7 @@ final class AppCoordinator: ObservableObject {
                     if case .success = result {
                         self.selectedHDMIIndex = index
                     }
-                    self.handleCommandResult(result, success: "已切换到 \(name)")
+                    self.handleCommandResult(result, success: name)
                 }
             }
         }
@@ -211,19 +226,19 @@ final class AppCoordinator: ObservableObject {
 
     private func connect(showPairingPrompt: Bool) {
         guard !settings.tvIP.isEmpty else {
-            status = "请先扫描或填写 LG C2 IP"
+            status = text(.currentDisconnected)
             showSettings()
             return
         }
 
-        status = showPairingPrompt ? "正在连接，请在电视上允许配对..." : "正在连接 \(settings.tvIP)..."
+        status = showPairingPrompt ? text(.connectPrompt) : "\(text(.startPairing)) \(settings.tvIP)..."
         webOSClient.connect(ip: settings.tvIP, clientKey: settings.clientKey, forcePairing: showPairingPrompt) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {
                 case .success(let clientKey):
                     self.settings.clientKey = clientKey
-                    self.status = "已连接 \(self.settings.tvName)"
+                    self.status = "\(self.text(.connected)) \(self.settings.tvName)"
                     self.refreshVolume()
                 case .failure(let message):
                     self.selectedHDMIIndex = nil
@@ -253,7 +268,7 @@ final class AppCoordinator: ObservableObject {
         case .success(let volumeStatus):
             settings.volume = volumeStatus.volume
             settings.muted = volumeStatus.muted
-            status = "已同步音量 \(volumeStatus.volume)%"
+            status = "\(text(.syncedVolume)) \(volumeStatus.volume)%"
             syncMenuState()
             settingsWindowController.updateOutput("volume=\(volumeStatus.volume), muted=\(volumeStatus.muted)")
         case .failure(let message):
@@ -297,5 +312,6 @@ final class AppCoordinator: ObservableObject {
         menuVolume = settings.volume
         menuMuted = settings.muted
         menuHDMINames = settings.hdmiNames
+        menuLanguageMode = settings.languageMode
     }
 }

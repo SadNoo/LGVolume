@@ -4,15 +4,19 @@ final class SettingsWindowController: NSWindowController {
     private let settings: AppSettings
     private weak var coordinator: AppCoordinator?
 
+    private var localizedTextFields: [(NSTextField, L10n.Key)] = []
     private let statusLabel = NSTextField(labelWithString: "")
     private let volumeWaveLabel = NSTextField(labelWithString: "")
     private let appearanceControl = NSSegmentedControl(labels: ["自动", "浅色", "深色"], trackingMode: .selectOne, target: nil, action: nil)
+    private let languageControl = NSSegmentedControl(labels: ["自动", "中文", "English", "日本語"], trackingMode: .selectOne, target: nil, action: nil)
     private let launchAtLoginButton = NSButton(checkboxWithTitle: "登录时自动启动 LGVolume", target: nil, action: nil)
     private let ipField = NSTextField()
     private let nameField = NSTextField()
     private let hdmiNameFields = (0..<4).map { _ in NSTextField() }
     private let hdmiShortcutFields = (0..<4).map { _ in ShortcutRecorderField() }
     private let connectButton = NSButton(title: "配对/连接", target: nil, action: nil)
+    private let saveButton = NSButton(title: "", target: nil, action: nil)
+    private let syncVolumeButton = NSButton(title: "", target: nil, action: nil)
     private var devices: [DiscoveredTV] = []
 
     init(settings: AppSettings, coordinator: AppCoordinator) {
@@ -24,7 +28,7 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "LGVolume 设置"
+        window.title = "LGVolume \(L10n.text(.settings, languageMode: settings.languageMode))"
         window.center()
         super.init(window: window)
         buildUI()
@@ -42,11 +46,39 @@ final class SettingsWindowController: NSWindowController {
         }
         for (offset, field) in hdmiShortcutFields.enumerated() {
             field.shortcut = settings.hdmiShortcut(offset + 1)
-            field.placeholderString = "未设置"
+            field.placeholderString = t(.notSet)
         }
         launchAtLoginButton.state = coordinator?.launchAtLogin == true ? .on : .off
         updateAppearanceSelection()
-        updateStatus(coordinator?.status ?? "未连接")
+        updateLanguageSelection()
+        refreshLocalizedText()
+        updateStatus(coordinator?.status ?? t(.currentDisconnected))
+    }
+
+    func refreshLocalizedText() {
+        window?.title = "LGVolume \(t(.settings))"
+        for (field, key) in localizedTextFields {
+            field.stringValue = t(key)
+        }
+
+        appearanceControl.setLabel(t(.auto), forSegment: 0)
+        appearanceControl.setLabel(t(.light), forSegment: 1)
+        appearanceControl.setLabel(t(.dark), forSegment: 2)
+
+        languageControl.setLabel(t(.auto), forSegment: 0)
+        languageControl.setLabel(t(.chinese), forSegment: 1)
+        languageControl.setLabel(t(.english), forSegment: 2)
+        languageControl.setLabel(t(.japanese), forSegment: 3)
+
+        launchAtLoginButton.title = t(.launchAtLogin)
+        ipField.placeholderString = t(.inputIP)
+        saveButton.title = t(.save)
+        syncVolumeButton.title = t(.syncVolume)
+
+        for field in hdmiShortcutFields {
+            field.placeholderString = t(.notSet)
+        }
+        updateStatus(coordinator?.status ?? t(.currentDisconnected))
     }
 
     func updateStatus(_ status: String) {
@@ -56,11 +88,11 @@ final class SettingsWindowController: NSWindowController {
         }
 
         if coordinator.isConnected {
-            statusLabel.stringValue = "已匹配成功：\(settings.tvName)  \(coordinator.currentTVIP)"
-            connectButton.title = "断开"
+            statusLabel.stringValue = "\(t(.matched)): \(settings.tvName)  \(coordinator.currentTVIP)"
+            connectButton.title = t(.disconnect)
         } else {
-            statusLabel.stringValue = status.isEmpty ? "未匹配" : status
-            connectButton.title = "配对/连接"
+            statusLabel.stringValue = status.isEmpty ? t(.noMatched) : status
+            connectButton.title = t(.pairConnect)
         }
         volumeWaveLabel.stringValue = volumeString(volume: coordinator.currentVolume, muted: coordinator.isMuted)
     }
@@ -98,8 +130,8 @@ final class SettingsWindowController: NSWindowController {
         header.spacing = 8
         header.edgeInsets = NSEdgeInsets(top: 28, left: 32, bottom: 22, right: 32)
         header.translatesAutoresizingMaskIntoConstraints = false
-        header.addArrangedSubview(titleLabel("通用"))
-        let subtitle = label("在这里配置局域网内的 LG 电视连接、HDMI 输入和全局音量快捷键。")
+        header.addArrangedSubview(titleLabel(.general))
+        let subtitle = localizedLabel(.generalSubtitle)
         subtitle.textColor = .secondaryLabelColor
         header.addArrangedSubview(subtitle)
         root.addArrangedSubview(header)
@@ -141,13 +173,13 @@ final class SettingsWindowController: NSWindowController {
         ])
 
         let statusRow = row()
-        statusRow.addArrangedSubview(fixedLabel("匹配状态："))
+        statusRow.addArrangedSubview(fixedLabel(.matchStatus))
         statusLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         statusRow.addArrangedSubview(statusLabel)
         form.addArrangedSubview(statusRow)
 
         let volumeRow = row()
-        volumeRow.addArrangedSubview(fixedLabel("已同步音量："))
+        volumeRow.addArrangedSubview(fixedLabel(.syncedVolume))
         volumeWaveLabel.font = .monospacedSystemFont(ofSize: 15, weight: .semibold)
         volumeRow.addArrangedSubview(volumeWaveLabel)
         form.addArrangedSubview(volumeRow)
@@ -155,28 +187,35 @@ final class SettingsWindowController: NSWindowController {
         form.addArrangedSubview(separatorLine(width: 600))
 
         let appearanceRow = row()
-        appearanceRow.addArrangedSubview(fixedLabel("外观："))
+        appearanceRow.addArrangedSubview(fixedLabel(.appearance))
         appearanceControl.target = self
         appearanceControl.action = #selector(changeAppearance)
         appearanceRow.addArrangedSubview(appearanceControl)
         form.addArrangedSubview(appearanceRow)
 
+        let languageRow = row()
+        languageRow.addArrangedSubview(fixedLabel(.language))
+        languageControl.target = self
+        languageControl.action = #selector(changeLanguage)
+        languageRow.addArrangedSubview(languageControl)
+        form.addArrangedSubview(languageRow)
+
         let loginRow = row()
-        loginRow.addArrangedSubview(fixedLabel("启动："))
+        loginRow.addArrangedSubview(fixedLabel(.launch))
         launchAtLoginButton.target = self
         launchAtLoginButton.action = #selector(changeLaunchAtLogin)
         loginRow.addArrangedSubview(launchAtLoginButton)
         form.addArrangedSubview(loginRow)
 
         let ipRow = row()
-        ipRow.addArrangedSubview(fixedLabel("LG C2 IP："))
-        ipField.placeholderString = "例如：192.168.1.23"
+        ipRow.addArrangedSubview(fixedLabel("LG C2 IP:"))
+        ipField.placeholderString = t(.inputIP)
         ipField.widthAnchor.constraint(equalToConstant: 390).isActive = true
         ipRow.addArrangedSubview(ipField)
         form.addArrangedSubview(ipRow)
 
         let nameRow = row()
-        nameRow.addArrangedSubview(fixedLabel("显示名称："))
+        nameRow.addArrangedSubview(fixedLabel(.displayName))
         nameField.placeholderString = "LG TV"
         nameField.widthAnchor.constraint(equalToConstant: 390).isActive = true
         nameRow.addArrangedSubview(nameField)
@@ -198,32 +237,39 @@ final class SettingsWindowController: NSWindowController {
 
         form.addArrangedSubview(separatorLine(width: 600))
 
-        let shortcuts = label("快捷键：F10 静音 / F11 减小音量 / F12 增加音量")
+        let shortcuts = localizedLabel(.shortcutsSummary)
         shortcuts.textColor = .secondaryLabelColor
         form.addArrangedSubview(shortcuts)
 
         let hdmiShortcutGrid = NSGridView(views: [
-            [fixedLabel("HDMI1 快捷键："), hdmiShortcutFields[0], fixedLabel("HDMI2 快捷键："), hdmiShortcutFields[1]],
-            [fixedLabel("HDMI3 快捷键："), hdmiShortcutFields[2], fixedLabel("HDMI4 快捷键："), hdmiShortcutFields[3]]
+            [fixedLabel(.hdmiShortcut1), hdmiShortcutFields[0], fixedLabel(.hdmiShortcut2), hdmiShortcutFields[1]],
+            [fixedLabel(.hdmiShortcut3), hdmiShortcutFields[2], fixedLabel(.hdmiShortcut4), hdmiShortcutFields[3]]
         ])
         hdmiShortcutGrid.rowSpacing = 10
         hdmiShortcutGrid.columnSpacing = 12
         for field in hdmiShortcutFields {
-            field.placeholderString = "未设置"
+            field.placeholderString = t(.notSet)
             field.alignment = .center
             field.widthAnchor.constraint(equalToConstant: 165).isActive = true
         }
         form.addArrangedSubview(hdmiShortcutGrid)
 
         let actionRow = row()
-        actionRow.addArrangedSubview(button("保存", action: #selector(save)))
+        saveButton.target = self
+        saveButton.action = #selector(save)
+        saveButton.bezelStyle = .rounded
+        actionRow.addArrangedSubview(saveButton)
         connectButton.target = self
         connectButton.action = #selector(connectOrDisconnect)
         connectButton.bezelStyle = .rounded
         actionRow.addArrangedSubview(connectButton)
-        actionRow.addArrangedSubview(button("同步音量", action: #selector(refreshVolume)))
+        syncVolumeButton.target = self
+        syncVolumeButton.action = #selector(refreshVolume)
+        syncVolumeButton.bezelStyle = .rounded
+        actionRow.addArrangedSubview(syncVolumeButton)
         form.addArrangedSubview(actionRow)
 
+        refreshLocalizedText()
         refresh()
     }
 
@@ -235,9 +281,16 @@ final class SettingsWindowController: NSWindowController {
         return stack
     }
 
-    private func titleLabel(_ text: String) -> NSTextField {
-        let field = label(text)
+    private func titleLabel(_ key: L10n.Key) -> NSTextField {
+        let field = localizedLabel(key)
         field.font = .systemFont(ofSize: 22, weight: .bold)
+        return field
+    }
+
+    private func fixedLabel(_ key: L10n.Key) -> NSTextField {
+        let field = localizedLabel(key)
+        field.alignment = .right
+        field.widthAnchor.constraint(equalToConstant: 124).isActive = true
         return field
     }
 
@@ -250,6 +303,12 @@ final class SettingsWindowController: NSWindowController {
 
     private func label(_ text: String) -> NSTextField {
         NSTextField(labelWithString: text)
+    }
+
+    private func localizedLabel(_ key: L10n.Key) -> NSTextField {
+        let field = label(t(key))
+        localizedTextFields.append((field, key))
+        return field
     }
 
     private func button(_ title: String, action: Selector) -> NSButton {
@@ -276,14 +335,38 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
+    private func updateLanguageSelection() {
+        switch settings.languageMode {
+        case "zh-Hans":
+            languageControl.selectedSegment = 1
+        case "en":
+            languageControl.selectedSegment = 2
+        case "ja":
+            languageControl.selectedSegment = 3
+        default:
+            languageControl.selectedSegment = 0
+        }
+    }
+
     private func volumeString(volume: Int, muted: Bool) -> String {
-        muted ? "静音" : "\(volume)%"
+        muted ? t(.muted) : "\(volume)%"
+    }
+
+    private func t(_ key: L10n.Key) -> String {
+        L10n.text(key, languageMode: settings.languageMode)
     }
 
     @objc private func changeAppearance() {
         let modes = ["auto", "light", "dark"]
         let index = max(0, min(appearanceControl.selectedSegment, modes.count - 1))
         coordinator?.setAppearanceMode(modes[index])
+    }
+
+    @objc private func changeLanguage() {
+        let modes = ["auto", "zh-Hans", "en", "ja"]
+        let index = max(0, min(languageControl.selectedSegment, modes.count - 1))
+        coordinator?.setLanguageMode(modes[index])
+        refreshLocalizedText()
     }
 
     @objc private func changeLaunchAtLogin() {

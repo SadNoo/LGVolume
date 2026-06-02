@@ -14,6 +14,7 @@ final class AppSettings {
         static let appearanceMode = "appearanceMode"
         static let launchAtLogin = "launchAtLogin"
         static let accessibilityPromptShown = "accessibilityPromptShown"
+        static let languageMode = "languageMode"
     }
 
     var tvIP: String {
@@ -105,5 +106,15 @@ final class AppSettings {
     var accessibilityPromptShown: Bool {
         get { defaults.bool(forKey: Key.accessibilityPromptShown) }
         set { defaults.set(newValue, forKey: Key.accessibilityPromptShown) }
+    }
+
+    var languageMode: String {
+        get {
+            let value = defaults.string(forKey: Key.languageMode) ?? "auto"
+            return ["auto", "zh-Hans", "en", "ja"].contains(value) ? value : "auto"
+        }
+        set {
+            defaults.set(newValue, forKey: Key.languageMode)
+        }
     }
 }
