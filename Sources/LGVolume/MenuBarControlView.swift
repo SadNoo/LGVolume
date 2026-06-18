@@ -182,7 +182,7 @@ private struct FooterActionLabel: View {
     let title: String
 
     var body: some View {
-            Text(title)
+        Text(title)
             .font(.system(size: 12, weight: .semibold))
             .lineLimit(1)
             .frame(maxWidth: .infinity, minHeight: 26)

@@ -81,27 +81,17 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    func saveManualSettings(ip: String, name: String) {
+    func saveSettings(ip: String, name: String, hdmiNames: [String], hdmiShortcuts: [KeyboardShortcut?]) {
         settings.tvIP = ip
         settings.tvName = name.isEmpty ? "LG TV" : name
-        syncMenuState()
-        status = text(.saveSuccess)
-    }
-
-    func saveHDMINames(_ names: [String]) {
-        for (offset, name) in names.enumerated() {
+        for (offset, name) in hdmiNames.enumerated() {
             settings.setHDMIName(name, index: offset + 1)
         }
-        syncMenuState()
-        status = text(.saveSuccess)
-        settingsWindowController.refresh()
-    }
-
-    func saveHDMIShortcuts(_ shortcuts: [KeyboardShortcut?]) {
-        for (offset, shortcut) in shortcuts.enumerated() {
+        for (offset, shortcut) in hdmiShortcuts.enumerated() {
             settings.setHDMIShortcut(shortcut, index: offset + 1)
         }
         keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
+        syncMenuState()
         status = text(.saveSuccess)
         settingsWindowController.refresh()
     }

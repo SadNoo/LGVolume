@@ -25,10 +25,10 @@ func drawShadow(color: NSColor, blur: CGFloat, offset: NSSize, drawing: () -> Vo
 image.lockFocus()
 
 let rect = NSRect(origin: .zero, size: size)
-let iconRect = rect.insetBy(dx: 56, dy: 56)
-let iconPath = NSBezierPath(roundedRect: iconRect, xRadius: 210, yRadius: 210)
+let iconRect = rect.insetBy(dx: 10, dy: 10)
+let iconPath = NSBezierPath(roundedRect: iconRect, xRadius: 224, yRadius: 224)
 
-drawShadow(color: NSColor.black.withAlphaComponent(0.18), blur: 44, offset: NSSize(width: 0, height: -18)) {
+drawShadow(color: NSColor.black.withAlphaComponent(0.20), blur: 34, offset: NSSize(width: 0, height: -10)) {
     NSColor.white.setFill()
     iconPath.fill()
 }
@@ -40,28 +40,28 @@ drawClipped(iconPath) {
         NSColor(calibratedRed: 1.00, green: 0.78, blue: 0.96, alpha: 1.0)
     ])?.draw(in: iconRect, angle: -34)
 
-    let cyanBlob = NSBezierPath(ovalIn: NSRect(x: 60, y: 74, width: 650, height: 650))
+    let cyanBlob = NSBezierPath(ovalIn: NSRect(x: -18, y: 42, width: 720, height: 720))
     NSGradient(colors: [
         NSColor(calibratedRed: 0.00, green: 0.72, blue: 1.00, alpha: 0.92),
         NSColor(calibratedRed: 0.07, green: 0.94, blue: 0.96, alpha: 0.35)
     ])?.draw(in: cyanBlob, angle: 22)
 
-    let pinkBlob = NSBezierPath(ovalIn: NSRect(x: 420, y: 210, width: 560, height: 650))
+    let pinkBlob = NSBezierPath(ovalIn: NSRect(x: 360, y: 168, width: 690, height: 735))
     NSGradient(colors: [
         NSColor(calibratedRed: 1.00, green: 0.55, blue: 0.92, alpha: 0.72),
         NSColor(calibratedRed: 1.00, green: 0.88, blue: 0.98, alpha: 0.20)
     ])?.draw(in: pinkBlob, angle: -18)
 
-    let blueCorner = NSBezierPath(ovalIn: NSRect(x: -150, y: -120, width: 540, height: 520))
+    let blueCorner = NSBezierPath(ovalIn: NSRect(x: -170, y: -140, width: 620, height: 590))
     NSColor(calibratedRed: 0.02, green: 0.48, blue: 1.00, alpha: 0.55).setFill()
     blueCorner.fill()
 
-    let topHighlight = NSBezierPath(roundedRect: NSRect(x: 142, y: 756, width: 740, height: 92), xRadius: 46, yRadius: 46)
+    let topHighlight = NSBezierPath(roundedRect: NSRect(x: 122, y: 766, width: 780, height: 96), xRadius: 48, yRadius: 48)
     NSColor.white.withAlphaComponent(0.42).setFill()
     topHighlight.fill()
 }
 
-let innerStroke = NSBezierPath(roundedRect: iconRect.insetBy(dx: 8, dy: 8), xRadius: 200, yRadius: 200)
+let innerStroke = NSBezierPath(roundedRect: iconRect.insetBy(dx: 8, dy: 8), xRadius: 216, yRadius: 216)
 NSColor.white.withAlphaComponent(0.76).setStroke()
 innerStroke.lineWidth = 10
 innerStroke.stroke()
@@ -71,17 +71,17 @@ iconPath.lineWidth = 8
 iconPath.stroke()
 
 let speakerGroup = NSBezierPath()
-speakerGroup.move(to: NSPoint(x: 272, y: 436))
-speakerGroup.line(to: NSPoint(x: 372, y: 436))
-speakerGroup.line(to: NSPoint(x: 520, y: 322))
-speakerGroup.curve(to: NSPoint(x: 560, y: 358), controlPoint1: NSPoint(x: 540, y: 307), controlPoint2: NSPoint(x: 560, y: 320))
-speakerGroup.line(to: NSPoint(x: 560, y: 666))
-speakerGroup.curve(to: NSPoint(x: 520, y: 702), controlPoint1: NSPoint(x: 560, y: 704), controlPoint2: NSPoint(x: 540, y: 717))
-speakerGroup.line(to: NSPoint(x: 372, y: 588))
-speakerGroup.line(to: NSPoint(x: 272, y: 588))
-speakerGroup.curve(to: NSPoint(x: 238, y: 554), controlPoint1: NSPoint(x: 251, y: 588), controlPoint2: NSPoint(x: 238, y: 575))
-speakerGroup.line(to: NSPoint(x: 238, y: 470))
-speakerGroup.curve(to: NSPoint(x: 272, y: 436), controlPoint1: NSPoint(x: 238, y: 449), controlPoint2: NSPoint(x: 251, y: 436))
+speakerGroup.move(to: NSPoint(x: 216, y: 420))
+speakerGroup.line(to: NSPoint(x: 344, y: 420))
+speakerGroup.line(to: NSPoint(x: 524, y: 284))
+speakerGroup.curve(to: NSPoint(x: 574, y: 330), controlPoint1: NSPoint(x: 552, y: 264), controlPoint2: NSPoint(x: 574, y: 286))
+speakerGroup.line(to: NSPoint(x: 574, y: 694))
+speakerGroup.curve(to: NSPoint(x: 524, y: 740), controlPoint1: NSPoint(x: 574, y: 738), controlPoint2: NSPoint(x: 552, y: 760))
+speakerGroup.line(to: NSPoint(x: 344, y: 604))
+speakerGroup.line(to: NSPoint(x: 216, y: 604))
+speakerGroup.curve(to: NSPoint(x: 178, y: 566), controlPoint1: NSPoint(x: 193, y: 604), controlPoint2: NSPoint(x: 178, y: 589))
+speakerGroup.line(to: NSPoint(x: 178, y: 458))
+speakerGroup.curve(to: NSPoint(x: 216, y: 420), controlPoint1: NSPoint(x: 178, y: 435), controlPoint2: NSPoint(x: 193, y: 420))
 speakerGroup.close()
 
 drawShadow(color: NSColor(calibratedRed: 0.00, green: 0.42, blue: 0.90, alpha: 0.32), blur: 28, offset: NSSize(width: 0, height: -10)) {
@@ -93,24 +93,24 @@ NSColor.white.withAlphaComponent(0.92).setStroke()
 speakerGroup.lineWidth = 5
 speakerGroup.stroke()
 
-for (index, radius) in [95, 158, 220].enumerated() {
+for (index, radius) in [105, 178, 252].enumerated() {
     let wave = NSBezierPath()
     wave.appendArc(
-        withCenter: NSPoint(x: 560, y: 512),
+        withCenter: NSPoint(x: 574, y: 512),
         radius: CGFloat(radius),
         startAngle: -42,
         endAngle: 42,
         clockwise: false
     )
     wave.lineCapStyle = .round
-    wave.lineWidth = CGFloat(42 - index * 8)
+    wave.lineWidth = CGFloat(46 - index * 9)
     NSColor.white.withAlphaComponent(0.84 - CGFloat(index) * 0.17).setStroke()
     wave.stroke()
 }
 
 let glassGlint = NSBezierPath()
-glassGlint.move(to: NSPoint(x: 346, y: 670))
-glassGlint.curve(to: NSPoint(x: 506, y: 704), controlPoint1: NSPoint(x: 400, y: 712), controlPoint2: NSPoint(x: 472, y: 724))
+glassGlint.move(to: NSPoint(x: 308, y: 682))
+glassGlint.curve(to: NSPoint(x: 506, y: 728), controlPoint1: NSPoint(x: 376, y: 730), controlPoint2: NSPoint(x: 462, y: 752))
 glassGlint.lineWidth = 20
 glassGlint.lineCapStyle = .round
 NSColor.white.withAlphaComponent(0.38).setStroke()
