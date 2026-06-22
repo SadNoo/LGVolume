@@ -44,7 +44,7 @@ final class DiscoveryService {
             }
             let name = parseName(response.text) ?? "LG TV"
             let device = DiscoveredTV(name: name, ip: response.ip)
-            if !devices.contains(device) {
+            if !devices.contains(where: { $0.ip == device.ip }) {
                 devices.append(device)
             }
         }
@@ -120,7 +120,10 @@ final class DiscoveryService {
 
     private func looksLikeLGTV(_ text: String) -> Bool {
         let lower = text.lowercased()
-        return lower.contains("webos") || lower.contains("lge") || lower.contains("lg")
+        return lower.contains("webos")
+            || lower.contains("urn:lge-com")
+            || lower.contains("lg smart tv")
+            || lower.contains("lg-electronics")
     }
 
     private func parseName(_ text: String) -> String? {

@@ -15,7 +15,9 @@ struct KeyboardShortcut: Equatable {
     init?(event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(Self.allowedModifiers)
         let key = Self.keyName(for: event)
-        guard !key.isEmpty else {
+        guard !key.isEmpty,
+              !Self.reservedKeyCodes.contains(event.keyCode),
+              Self.isSafeGlobalShortcut(modifiers: modifiers, keyCode: event.keyCode) else {
             return nil
         }
         self.init(keyCode: event.keyCode, modifiers: modifiers, display: Self.display(modifiers: modifiers, key: key))
@@ -28,9 +30,15 @@ struct KeyboardShortcut: Equatable {
               let modifierRaw = UInt(parts[1]) else {
             return nil
         }
+        let modifiers = NSEvent.ModifierFlags(rawValue: modifierRaw).intersection(Self.allowedModifiers)
+        let storedDisplay = parts[2]
+        guard !Self.reservedKeyCodes.contains(keyCode),
+              Self.isSafeGlobalShortcut(modifiers: modifiers, keyCode: keyCode) else {
+            return nil
+        }
         self.keyCode = keyCode
-        self.modifiers = NSEvent.ModifierFlags(rawValue: modifierRaw).intersection(Self.allowedModifiers)
-        self.display = parts[2]
+        self.modifiers = modifiers
+        self.display = storedDisplay
     }
 
     var storageValue: String {
@@ -63,6 +71,19 @@ struct KeyboardShortcut: Equatable {
     }
 
     private static let allowedModifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+    private static let requiredModifiers: NSEvent.ModifierFlags = [.command, .option, .control]
+    private static let reservedKeyCodes: Set<UInt16> = [103, 109, 111]
+
+    private static func isSafeGlobalShortcut(modifiers: NSEvent.ModifierFlags, keyCode: UInt16) -> Bool {
+        if !modifiers.intersection(requiredModifiers).isEmpty {
+            return true
+        }
+        return functionKeyCodes.contains(keyCode)
+    }
+
+    private static let functionKeyCodes: Set<UInt16> = [
+        96, 97, 98, 99, 100, 101, 103, 105, 106, 107, 109, 111, 113, 118, 120, 122
+    ]
 
     private static func display(modifiers: NSEvent.ModifierFlags, key: String) -> String {
         var value = ""
@@ -122,6 +143,10 @@ struct KeyboardShortcut: Equatable {
 }
 
 final class ShortcutRecorderField: NSTextField {
+    var recordingPlaceholder = "Press a shortcut"
+    var emptyPlaceholder = "Not set"
+    var invalidPlaceholder = "Add Command, Option, or Control"
+
     var shortcut: KeyboardShortcut? {
         didSet {
             stringValue = shortcut?.display ?? ""
@@ -133,7 +158,7 @@ final class ShortcutRecorderField: NSTextField {
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted, shortcut == nil {
-            placeholderString = "按下快捷键"
+            placeholderString = recordingPlaceholder
         }
         return accepted
     }
@@ -150,11 +175,12 @@ final class ShortcutRecorderField: NSTextField {
     private func capture(_ event: NSEvent) {
         if event.keyCode == 53 || event.keyCode == 51 || event.keyCode == 117 {
             shortcut = nil
-            placeholderString = "未设置"
+            placeholderString = emptyPlaceholder
             return
         }
 
         guard let value = KeyboardShortcut(event: event) else {
+            placeholderString = invalidPlaceholder
             NSSound.beep()
             return
         }

@@ -57,6 +57,7 @@ struct MenuBarControlView: View {
                         .frame(width: 22, height: 24)
                 }
                 .buttonStyle(.plain)
+                .disabled(!coordinator.isConnected)
                 .accessibilityLabel(coordinator.menuMuted ? coordinator.text(.turnMuteOff) : coordinator.text(.turnMuteOn))
 
                 Text(coordinator.text(.volume))
@@ -78,7 +79,7 @@ struct MenuBarControlView: View {
 
                 VolumeTrack(
                     value: $sliderVolume,
-                    disabled: coordinator.menuMuted,
+                    disabled: coordinator.menuMuted || !coordinator.isConnected,
                     onEditingChanged: { editing in
                         isSliding = editing
                         if !editing {
@@ -108,12 +109,29 @@ struct MenuBarControlView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(!coordinator.isConnected)
+                .opacity(coordinator.isConnected ? 1 : 0.48)
             }
+
+            if !coordinator.isConnected {
+                Button {
+                    coordinator.reconnect()
+                } label: {
+                    FooterActionLabel(
+                        title: coordinator.isConnecting ? coordinator.text(.startPairing) : coordinator.text(.pairConnect),
+                        symbol: coordinator.isConnecting ? "arrow.triangle.2.circlepath" : "link"
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(coordinator.isConnecting)
+            }
+
+            Divider()
 
             Button {
                 coordinator.showSettings()
             } label: {
-                FooterActionLabel(title: coordinator.text(.settings))
+                FooterActionLabel(title: coordinator.text(.settings), symbol: "gearshape")
             }
             .buttonStyle(.plain)
             .keyboardShortcut(",", modifiers: .command)
@@ -121,7 +139,7 @@ struct MenuBarControlView: View {
             Button {
                 coordinator.quit()
             } label: {
-                FooterActionLabel(title: coordinator.text(.quit))
+                FooterActionLabel(title: coordinator.text(.quit), symbol: "power", isSecondary: true)
             }
             .buttonStyle(.plain)
             .keyboardShortcut("q", modifiers: .command)
@@ -129,6 +147,9 @@ struct MenuBarControlView: View {
     }
 
     private var headerTitle: String {
+        if coordinator.isConnecting {
+            return coordinator.text(.startPairing)
+        }
         if coordinator.isConnected {
             return coordinator.menuTitle
         }
@@ -136,7 +157,10 @@ struct MenuBarControlView: View {
     }
 
     private var statusColor: Color {
-        coordinator.isConnected ? .green : .secondary.opacity(0.55)
+        if coordinator.isConnecting {
+            return .orange
+        }
+        return coordinator.isConnected ? .green : .secondary.opacity(0.55)
     }
 
     private var displayVolumeText: String {
@@ -180,12 +204,21 @@ private struct HDMIButtonLabel: View {
 
 private struct FooterActionLabel: View {
     let title: String
+    var symbol: String? = nil
+    var isSecondary = false
 
     var body: some View {
-        Text(title)
-            .font(.system(size: 12, weight: .semibold))
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, minHeight: 26)
+        HStack(spacing: 6) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+        }
+            .foregroundStyle(isSecondary ? .secondary : .primary)
+            .frame(maxWidth: .infinity, minHeight: 28)
             .background {
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .fill(Color.primary.opacity(0.07))

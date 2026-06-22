@@ -9,17 +9,30 @@ final class WebOSClient: NSObject {
     private var webSocket: URLSessionWebSocketTask?
     private var session: URLSession?
     private var pending: [String: (Any) -> Bool] = [:]
+    private var requestTimeouts: [String: DispatchWorkItem] = [:]
+    private var requestCancellations: [String: () -> Void] = [:]
     private var nextID = 1
     private var connectTimeout: DispatchWorkItem?
+    private var connectionAttemptFallback: (() -> Void)?
     private var completionCalled = false
+    private let languageMode: () -> String
+    private let connectionStateChanged: (Bool) -> Void
 
     private(set) var isConnected = false
+
+    init(
+        languageMode: @escaping () -> String = { "auto" },
+        connectionStateChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.languageMode = languageMode
+        self.connectionStateChanged = connectionStateChanged
+    }
 
     func connect(ip: String, clientKey: String, forcePairing: Bool, completion: @escaping (LGResult<String>) -> Void) {
         disconnect()
 
-        guard Self.isLocalNetworkIPv4(ip) else {
-            completion(.failure("为保护隐私，LGVolume 仅允许连接局域网 IPv4 地址（例如 192.168.x.x、10.x.x.x 或 172.16-31.x.x）。"))
+        guard LocalNetworkAddress.isAllowedIPv4(ip) else {
+            completion(.failure(t(.localNetworkOnly)))
             return
         }
 
@@ -29,7 +42,7 @@ final class WebOSClient: NSObject {
         ].compactMap { $0 }
 
         guard !urls.isEmpty else {
-            completion(.failure("IP 地址无效：\(ip)"))
+            completion(.failure("\(t(.invalidIPAddress)): \(ip)"))
             return
         }
 
@@ -38,22 +51,13 @@ final class WebOSClient: NSObject {
 
     private func connect(urls: [URL], index: Int, ip: String, clientKey: String, forcePairing: Bool, completion: @escaping (LGResult<String>) -> Void) {
         guard urls.indices.contains(index) else {
-            completion(.failure("""
-            电视没有响应配对请求。
-
-            请确认：
-            1. LG C2 已开机，Mac 和电视在同一个 Wi-Fi/局域网。
-            2. 电视设置里允许手机/外部 App 控制。
-            3. macOS 系统设置 -> 隐私与安全性 -> 本地网络，允许 LGVolume。
-            4. 如果自动扫描不准，请在电视网络设置里查看 IP 后手动填写。
-
-            已尝试：wss://\(ip):3001 和 ws://\(ip):3000
-            """))
+            disconnect()
+            completion(.failure(t(.tvNoResponse)))
             return
         }
 
         let url = urls[index]
-        disconnect(keepCallbacks: true)
+        disconnect()
         completionCalled = false
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
@@ -64,7 +68,17 @@ final class WebOSClient: NSObject {
         self.session = session
         self.webSocket = task
         task.resume()
-        receiveLoop()
+        receiveLoop(for: task)
+        connectionAttemptFallback = { [weak self] in
+            self?.connect(
+                urls: urls,
+                index: index + 1,
+                ip: ip,
+                clientKey: clientKey,
+                forcePairing: forcePairing,
+                completion: completion
+            )
+        }
 
         let id = makeID()
         var payload = registrationPayload(forcePairing: forcePairing)
@@ -74,9 +88,7 @@ final class WebOSClient: NSObject {
 
         pending[id] = { response in
             guard let dictionary = response as? [String: Any] else {
-                self.connectTimeout?.cancel()
-                self.completionCalled = true
-                completion(.failure("电视返回了无法解析的配对响应。"))
+                self.finishConnection(.failure(self.t(.pairingResponseInvalid)), completion: completion)
                 return true
             }
 
@@ -84,20 +96,22 @@ final class WebOSClient: NSObject {
             let payload = dictionary["payload"] as? [String: Any] ?? [:]
             if type == "registered" {
                 self.connectTimeout?.cancel()
+                self.connectionAttemptFallback = nil
                 self.completionCalled = true
-                self.isConnected = true
+                self.setConnected(true)
                 let newKey = payload["client-key"] as? String ?? clientKey
                 completion(.success(newKey))
                 return true
             } else if type == "error" {
-                self.connectTimeout?.cancel()
-                self.completionCalled = true
-                completion(.failure(payload["error"] as? String ?? "配对失败，请在电视上允许 LGVolume。"))
+                self.finishConnection(
+                    .failure(payload["error"] as? String ?? self.t(.pairingFailed)),
+                    completion: completion
+                )
                 return true
             } else if self.isPairingPromptResponse(type: type, payload: payload) {
                 self.scheduleTimeout(after: 90) { [weak self] in
-                    self?.completionCalled = true
-                    completion(.failure("等待电视授权超时。请重新点“配对/连接”，并在电视弹窗出现后选择允许。"))
+                    guard let self, !self.completionCalled else { return }
+                    self.finishConnection(.failure(self.t(.pairingTimeout)), completion: completion)
                 }
                 return false
             } else {
@@ -111,41 +125,57 @@ final class WebOSClient: NSObject {
             "payload": payload
         ])
 
-        scheduleTimeout(after: 5) { [weak self] in
+        scheduleTimeout(after: forcePairing ? 90 : 8) { [weak self] in
             guard let self, !self.completionCalled else { return }
-            self.connect(urls: urls, index: index + 1, ip: ip, clientKey: clientKey, forcePairing: forcePairing, completion: completion)
+            if forcePairing {
+                self.finishConnection(.failure(self.t(.pairingTimeout)), completion: completion)
+            } else {
+                self.retryConnectionAttempt()
+            }
         }
     }
 
     func disconnect() {
-        disconnect(keepCallbacks: false)
-    }
-
-    private func disconnect(keepCallbacks: Bool) {
-        isConnected = false
-        if !keepCallbacks {
-            pending.removeAll()
+        setConnected(false)
+        pending.removeAll()
+        for timeout in requestTimeouts.values {
+            timeout.cancel()
         }
+        requestTimeouts.removeAll()
+        let cancellations = Array(requestCancellations.values)
+        requestCancellations.removeAll()
         connectTimeout?.cancel()
         connectTimeout = nil
+        connectionAttemptFallback = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         session = nil
+        for cancel in cancellations {
+            cancel()
+        }
     }
 
     func getVolume(completion: @escaping (LGResult<TVVolumeStatus>) -> Void) {
         request(uri: "ssap://audio/getVolume", payload: [:]) { response in
-            guard let payload = response["payload"] as? [String: Any] else {
-                completion(.failure("无法读取电视音量。"))
+            if case .failure(let message) = self.resultFromResponse(response) {
+                completion(.failure(message))
                 return
             }
-            completion(.success(Self.parseVolumeStatus(payload)))
+            guard let payload = response["payload"] as? [String: Any] else {
+                completion(.failure(self.t(.volumeReadFailed)))
+                return
+            }
+            guard let status = Self.parseVolumeStatus(payload) else {
+                completion(.failure(self.t(.volumeReadFailed)))
+                return
+            }
+            completion(.success(status))
         }
     }
 
     func setVolume(_ volume: Int, completion: @escaping (LGResult<Void>) -> Void) {
         request(uri: "ssap://audio/setVolume", payload: ["volume": min(max(volume, 0), 100)]) { response in
-            completion(Self.resultFromResponse(response))
+            completion(self.resultFromResponse(response))
         }
     }
 
@@ -161,20 +191,44 @@ final class WebOSClient: NSObject {
 
     func setMuted(_ muted: Bool, completion: @escaping (LGResult<Void>) -> Void) {
         request(uri: "ssap://audio/setMute", payload: ["mute": muted]) { response in
-            completion(Self.resultFromResponse(response))
+            completion(self.resultFromResponse(response))
         }
     }
 
     func switchHDMI(_ index: Int, completion: @escaping (LGResult<Void>) -> Void) {
-        let inputID = "HDMI_\(min(max(index, 1), 4))"
+        let safeIndex = min(max(index, 1), 4)
+        let inputID = "HDMI_\(safeIndex)"
         request(uri: "ssap://tv/switchInput", payload: ["inputId": inputID]) { response in
-            completion(Self.resultFromResponse(response))
+            let result = self.resultFromResponse(response)
+            if case .success = result {
+                completion(result)
+                return
+            }
+            self.request(
+                uri: "ssap://system.launcher/launch",
+                payload: ["id": "com.webos.app.hdmi\(safeIndex)"]
+            ) { fallbackResponse in
+                completion(self.resultFromResponse(fallbackResponse))
+            }
+        }
+    }
+
+    func getCurrentHDMI(completion: @escaping (LGResult<Int?>) -> Void) {
+        request(uri: "ssap://com.webos.applicationManager/getForegroundAppInfo", payload: [:]) { response in
+            if case .failure(let message) = self.resultFromResponse(response) {
+                completion(.failure(message))
+                return
+            }
+            let payload = response["payload"] as? [String: Any]
+            let appID = (payload?["appId"] as? String ?? "").lowercased()
+            let index = (1...4).first { appID.contains("hdmi\($0)") || appID.contains("hdmi_\($0)") }
+            completion(.success(index))
         }
     }
 
     private func request(uri: String, payload: [String: Any], completion: @escaping ([String: Any]) -> Void) {
         guard isConnected else {
-            completion(["type": "error", "payload": ["error": "尚未连接电视。"]])
+            completion(["type": "error", "payload": ["error": t(.notConnected)]])
             return
         }
 
@@ -183,6 +237,20 @@ final class WebOSClient: NSObject {
             completion(response as? [String: Any] ?? [:])
             return true
         }
+        requestCancellations[id] = { [weak self] in
+            guard let self else { return }
+            completion(["type": "error", "payload": ["error": self.t(.notConnected)]])
+        }
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.pending.removeValue(forKey: id) != nil else {
+                return
+            }
+            self.requestTimeouts.removeValue(forKey: id)
+            self.requestCancellations.removeValue(forKey: id)
+            completion(["type": "error", "payload": ["error": self.t(.requestTimedOut)]])
+        }
+        requestTimeouts[id] = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: timeout)
         send(dictionary: [
             "id": id,
             "type": "request",
@@ -198,7 +266,7 @@ final class WebOSClient: NSObject {
         }
 
         request(uri: uri, payload: [:]) { response in
-            switch Self.resultFromResponse(response) {
+            switch self.resultFromResponse(response) {
             case .success:
                 self.sendVolumeStep(uri: uri, remaining: remaining - 1, completion: completion)
             case .failure(let message):
@@ -216,15 +284,20 @@ final class WebOSClient: NSObject {
         webSocket.send(.string(text)) { _ in }
     }
 
-    private func receiveLoop() {
-        webSocket?.receive { [weak self] result in
+    private func receiveLoop(for task: URLSessionWebSocketTask) {
+        task.receive { [weak self, weak task] result in
             guard let self else { return }
-            switch result {
-            case .success(let message):
-                self.handle(message)
-                self.receiveLoop()
-            case .failure:
-                self.isConnected = false
+            DispatchQueue.main.async {
+                guard let task, self.webSocket === task else {
+                    return
+                }
+                switch result {
+                case .success(let message):
+                    self.handle(message)
+                    self.receiveLoop(for: task)
+                case .failure:
+                    self.handleTransportClosed()
+                }
             }
         }
     }
@@ -250,6 +323,8 @@ final class WebOSClient: NSObject {
         }
         if callback(object) {
             pending.removeValue(forKey: id)
+            requestTimeouts.removeValue(forKey: id)?.cancel()
+            requestCancellations.removeValue(forKey: id)
         }
     }
 
@@ -259,19 +334,30 @@ final class WebOSClient: NSObject {
         return id
     }
 
-    private static func resultFromResponse(_ response: [String: Any]) -> LGResult<Void> {
+    private func resultFromResponse(_ response: [String: Any]) -> LGResult<Void> {
         if response["type"] as? String == "error" {
             let payload = response["payload"] as? [String: Any]
-            return .failure(payload?["error"] as? String ?? "电视拒绝了命令。")
+            return .failure(payload?["error"] as? String ?? t(.commandRejected))
+        }
+        if let payload = response["payload"] as? [String: Any],
+           payload["returnValue"] as? Bool == false {
+            let message = payload["errorText"] as? String
+                ?? payload["error"] as? String
+                ?? t(.commandRejected)
+            return .failure(message)
         }
         return .success(())
     }
 
-    private static func parseVolumeStatus(_ payload: [String: Any]) -> TVVolumeStatus {
+    static func parseVolumeStatus(_ payload: [String: Any]) -> TVVolumeStatus? {
         let volumeStatus = payload["volumeStatus"] as? [String: Any]
         let source = volumeStatus ?? payload
         let volume = source["volume"] as? Int
-            ?? Int(source["volume"] as? Double ?? 50)
+            ?? (source["volume"] as? Double).map(Int.init)
+            ?? Int(source["volume"] as? String ?? "")
+        guard let volume else {
+            return nil
+        }
         let muted = source["muted"] as? Bool
             ?? source["mute"] as? Bool
             ?? source["muteStatus"] as? Bool
@@ -284,6 +370,54 @@ final class WebOSClient: NSObject {
         let timeout = DispatchWorkItem(block: action)
         connectTimeout = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: timeout)
+    }
+
+    private func t(_ key: L10n.Key) -> String {
+        L10n.text(key, languageMode: languageMode())
+    }
+
+    private func setConnected(_ connected: Bool) {
+        guard isConnected != connected else {
+            return
+        }
+        isConnected = connected
+        connectionStateChanged(connected)
+    }
+
+    private func handleTransportClosed() {
+        if isConnected {
+            disconnect()
+        } else {
+            retryConnectionAttempt()
+        }
+    }
+
+    private func retryConnectionAttempt() {
+        guard !completionCalled, let fallback = connectionAttemptFallback else {
+            return
+        }
+        connectionAttemptFallback = nil
+        connectTimeout?.cancel()
+        connectTimeout = nil
+        pending.removeAll()
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        session = nil
+        fallback()
+    }
+
+    private func finishConnection(_ result: LGResult<String>, completion: @escaping (LGResult<String>) -> Void) {
+        guard !completionCalled else {
+            return
+        }
+        completionCalled = true
+        connectTimeout?.cancel()
+        connectionAttemptFallback = nil
+        pending.removeAll()
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        session = nil
+        completion(result)
     }
 
     private func isPairingPromptResponse(type: String, payload: [String: Any]) -> Bool {
@@ -300,22 +434,9 @@ final class WebOSClient: NSObject {
         let permissions = [
             "CONTROL_AUDIO",
             "CONTROL_DISPLAY",
-            "CONTROL_INPUT_JOYSTICK",
-            "CONTROL_INPUT_MEDIA_RECORDING",
-            "CONTROL_INPUT_MEDIA_PLAYBACK",
-            "CONTROL_INPUT_TEXT",
-            "CONTROL_MOUSE_AND_KEYBOARD",
-            "CONTROL_POWER",
+            "CONTROL_INPUT_TV",
             "LAUNCH",
-            "LAUNCH_WEBAPP",
-            "READ_CURRENT_CHANNEL",
-            "READ_INSTALLED_APPS",
-            "READ_LGE_SDX",
-            "READ_NOTIFICATIONS",
-            "READ_POWER_STATE",
-            "READ_RUNNING_APPS",
-            "READ_TV_CURRENT_TIME",
-            "WRITE_NOTIFICATION_TOAST"
+            "READ_RUNNING_APPS"
         ]
 
         return [
@@ -344,30 +465,16 @@ final class WebOSClient: NSObject {
         ]
     }
 
-    private static func isLocalNetworkIPv4(_ ip: String) -> Bool {
-        let parts = ip.split(separator: ".").compactMap { Int($0) }
-        guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else {
-            return false
-        }
-        if parts[0] == 10 {
-            return true
-        }
-        if parts[0] == 172 && (16...31).contains(parts[1]) {
-            return true
-        }
-        if parts[0] == 192 && parts[1] == 168 {
-            return true
-        }
-        if parts[0] == 169 && parts[1] == 254 {
-            return true
-        }
-        return false
-    }
 }
 
 extension WebOSClient: URLSessionWebSocketDelegate {
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        isConnected = false
+        DispatchQueue.main.async { [weak self, weak webSocketTask] in
+            guard let self, let webSocketTask, self.webSocket === webSocketTask else {
+                return
+            }
+            self.handleTransportClosed()
+        }
     }
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {

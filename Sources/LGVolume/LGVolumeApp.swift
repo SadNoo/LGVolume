@@ -14,9 +14,9 @@ struct LGVolumeApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuBarControlView(coordinator: coordinator)
-                .frame(width: 164)
+                .frame(width: 184)
                 .onAppear {
-                    coordinator.refreshVolume()
+                    coordinator.refreshTVState()
                 }
         } label: {
             Image(systemName: coordinator.menuMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")

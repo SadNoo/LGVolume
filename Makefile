@@ -5,10 +5,13 @@ APP_BUNDLE := $(DIST_DIR)/$(APP_NAME).app
 INSTALL_DIR ?= $(HOME)/Applications
 BUILD_ENV := HOME=$(CURDIR) CLANG_MODULE_CACHE_PATH=$(CURDIR)/$(BUILD_DIR)/ModuleCache SWIFTPM_CUSTOM_CACHE_PATH=$(CURDIR)/$(BUILD_DIR)/SwiftPMCache
 
-.PHONY: build run install clean
+.PHONY: build test run install clean
 
 build:
 	env $(BUILD_ENV) ./Scripts/package_app.sh
+
+test:
+	env $(BUILD_ENV) swift test
 
 run: build
 	open "$(APP_BUNDLE)"

@@ -3,36 +3,64 @@ import Combine
 import ServiceManagement
 
 final class AppCoordinator: ObservableObject {
+    private struct PendingConnectionAction {
+        let run: () -> Void
+        let fail: () -> Void
+    }
+
     private let settings = AppSettings()
-    private let webOSClient = WebOSClient()
-    private lazy var settingsWindowController = SettingsWindowController(settings: settings, coordinator: self)
+    private lazy var webOSClient = WebOSClient(
+        languageMode: { [weak self] in
+            self?.settings.languageMode ?? "auto"
+        },
+        connectionStateChanged: { [weak self] connected in
+            self?.handleConnectionStateChanged(connected)
+        }
+    )
+    private var settingsWindowController: SettingsWindowController?
+    private var discoveredDevices: [DiscoveredTV] = []
     private lazy var keyboardVolumeMonitor = KeyboardVolumeMonitor(
         onVolumeDown: { [weak self] in DispatchQueue.main.async { self?.adjustVolumeByKeyboard(delta: -1) } },
         onVolumeUp: { [weak self] in DispatchQueue.main.async { self?.adjustVolumeByKeyboard(delta: 1) } },
         onMute: { [weak self] in DispatchQueue.main.async { self?.toggleMuteFromPanel() } },
         hdmiShortcuts: { [weak self] in self?.settings.hdmiShortcuts ?? [] },
         onHDMIShortcut: { [weak self] index in DispatchQueue.main.async { self?.switchHDMIFromPanel(index: index) } },
-        shouldPromptForAccessibility: { [weak self] in self?.settings.accessibilityPromptShown == false },
-        markAccessibilityPromptShown: { [weak self] in self?.settings.accessibilityPromptShown = true }
+        onShortcutRegistrationChanged: { [weak self] states in
+            DispatchQueue.main.async { self?.shortcutRegistrationStates = states }
+        }
     )
+    @Published private(set) var isConnecting = false
+    private var pendingConnectionActions: [PendingConnectionAction] = []
+    private var pendingVolumeTarget: Int?
+    private var volumeCommandInFlight = false
+    private var volumeCommandGeneration = 0
+    private var activeVolumeCommandGeneration: Int?
+    private var muteCommandGeneration = 0
+    private var hdmiCommandGeneration = 0
 
     @Published private(set) var status = "" {
         didSet {
-            settingsWindowController.updateStatus(status)
+            settingsWindowController?.updateStatus()
         }
     }
     @Published private(set) var menuTitle = "LG TV"
     @Published private(set) var menuVolume = 50
     @Published private(set) var menuMuted = false
+    @Published private(set) var connectionState = false
     @Published private(set) var menuHDMINames = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"]
     @Published private(set) var selectedHDMIIndex: Int?
     @Published private(set) var menuLanguageMode = "auto"
+    @Published private(set) var shortcutRegistrationStates = [true, true, true, true] {
+        didSet { settingsWindowController?.updateShortcutStatus() }
+    }
 
     var isMuted: Bool { menuMuted }
-    var isConnected: Bool { webOSClient.isConnected }
+    var isConnected: Bool { connectionState }
     var currentVolume: Int { menuVolume }
-    var currentTVIP: String { settings.tvIP }
-    var launchAtLogin: Bool { settings.launchAtLogin }
+    var launchAtLogin: Bool {
+        let serviceStatus = SMAppService.mainApp.status
+        return serviceStatus == .enabled || serviceStatus == .requiresApproval
+    }
     var hdmiShortcuts: [KeyboardShortcut?] { settings.hdmiShortcuts }
 
     init() {
@@ -41,20 +69,23 @@ final class AppCoordinator: ObservableObject {
     }
 
     func start() {
+        settings.launchAtLogin = launchAtLogin
         applyAppearance()
         syncMenuState()
         keyboardVolumeMonitor.start()
         if !settings.tvIP.isEmpty {
-            connect(showPairingPrompt: false)
+            connect(showPairingPrompt: settings.clientKey.isEmpty)
         } else {
             discoverTV()
         }
     }
 
     func showSettings() {
-        settingsWindowController.showWindow(nil)
+        keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
+        let controller = getSettingsWindowController()
+        controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
-        settingsWindowController.refresh()
+        controller.refresh()
     }
 
     func quit() {
@@ -70,10 +101,11 @@ final class AppCoordinator: ObservableObject {
         DiscoveryService().scan { [weak self] devices in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.settingsWindowController.updateDevices(devices)
-                if let first = devices.first {
-                    self.status = "\(self.text(.connected)) \(first.name) (\(first.ip))"
-                    self.settingsWindowController.refresh()
+                self.discoveredDevices = devices
+                self.settingsWindowController?.updateDevices(devices)
+                if !devices.isEmpty {
+                    self.status = self.text(.currentDisconnected)
+                    self.settingsWindowController?.refresh()
                 } else {
                     self.status = self.text(.currentDisconnected)
                 }
@@ -82,7 +114,16 @@ final class AppCoordinator: ObservableObject {
     }
 
     func saveSettings(ip: String, name: String, hdmiNames: [String], hdmiShortcuts: [KeyboardShortcut?]) {
-        settings.tvIP = ip
+        let normalizedIP = ip.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ipChanged = settings.tvIP != normalizedIP
+        if ipChanged {
+            resetActiveCommands()
+            isConnecting = false
+            webOSClient.disconnect()
+            settings.clearClientKey()
+            selectedHDMIIndex = nil
+        }
+        settings.tvIP = normalizedIP
         settings.tvName = name.isEmpty ? "LG TV" : name
         for (offset, name) in hdmiNames.enumerated() {
             settings.setHDMIName(name, index: offset + 1)
@@ -93,33 +134,40 @@ final class AppCoordinator: ObservableObject {
         keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
         syncMenuState()
         status = text(.saveSuccess)
-        settingsWindowController.refresh()
+        settingsWindowController?.refresh()
     }
 
     func restoreDefaultHDMIShortcuts() {
         settings.resetHDMIShortcuts()
         keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
         status = text(.saveSuccess)
-        settingsWindowController.refresh()
+        settingsWindowController?.refresh()
     }
 
     func pair() {
         settings.clearClientKey()
+        failPendingConnectionActions()
+        resetActiveCommands()
+        isConnecting = false
+        webOSClient.disconnect()
         connect(showPairingPrompt: true)
     }
 
     func disconnect() {
+        failPendingConnectionActions()
+        resetActiveCommands()
+        isConnecting = false
         webOSClient.disconnect()
         selectedHDMIIndex = nil
         status = text(.disconnected)
-        settingsWindowController.refresh()
+        settingsWindowController?.refresh()
     }
 
     func setAppearanceMode(_ mode: String) {
         settings.appearanceMode = mode
         applyAppearance()
         syncMenuState()
-        settingsWindowController.refresh()
+        settingsWindowController?.refresh()
     }
 
     func setLanguageMode(_ mode: String) {
@@ -127,36 +175,46 @@ final class AppCoordinator: ObservableObject {
         menuLanguageMode = mode
         status = webOSClient.isConnected ? "\(text(.connected)) \(settings.tvName)" : text(.currentDisconnected)
         syncMenuState()
-        settingsWindowController.refreshLocalizedText()
-        settingsWindowController.refresh()
+        settingsWindowController?.refresh()
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
-        settings.launchAtLogin = enabled
         do {
             if enabled {
-                if SMAppService.mainApp.status != .enabled {
+                if SMAppService.mainApp.status == .notRegistered {
                     try SMAppService.mainApp.register()
                 }
-                status = text(.save)
+                status = text(.saveSuccess)
             } else {
-                if SMAppService.mainApp.status == .enabled {
+                if SMAppService.mainApp.status != .notRegistered {
                     try SMAppService.mainApp.unregister()
                 }
-                status = text(.save)
+                status = text(.saveSuccess)
             }
         } catch {
             settings.launchAtLogin = SMAppService.mainApp.status == .enabled
             status = "\(text(.launch)) \(error.localizedDescription)"
         }
-        settingsWindowController.refresh()
+        settings.launchAtLogin = launchAtLogin
+        settingsWindowController?.refresh()
     }
 
     func refreshVolume() {
-        guard webOSClient.isConnected else {
-            connect(showPairingPrompt: false)
-            return
+        refreshTVState()
+    }
+
+    func refreshTVState() {
+        ensureConnectedThen { [weak self] in
+            self?.requestVolume()
+            self?.requestCurrentHDMI()
         }
+    }
+
+    func reconnect() {
+        connect(showPairingPrompt: settings.clientKey.isEmpty)
+    }
+
+    private func requestVolume() {
         webOSClient.getVolume { [weak self] result in
             DispatchQueue.main.async {
                 self?.handleVolumeResult(result)
@@ -165,42 +223,27 @@ final class AppCoordinator: ObservableObject {
     }
 
     func setVolumeFromPanel(_ volume: Int) {
-        let previousVolume = settings.volume
-        let delta = volume - previousVolume
-        settings.volume = volume
-        settings.muted = false
-        syncMenuState()
-
-        ensureConnectedThen { [weak self] in
-            guard let self else { return }
-            self.webOSClient.changeVolume(delta: delta) { stepResult in
-                DispatchQueue.main.async {
-                    switch stepResult {
-                    case .success:
-                        self.handleCommandResult(.success(()), success: "\(self.text(.volume)) \(volume)%")
-                        self.refreshVolume()
-                    case .failure:
-                        self.webOSClient.setVolume(volume) { setResult in
-                            DispatchQueue.main.async {
-                                self.handleCommandResult(setResult, success: "\(self.text(.volume)) \(volume)%")
-                                self.refreshVolume()
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        pendingVolumeTarget = min(max(volume, 0), 100)
+        processPendingVolumeTarget()
     }
 
     func toggleMuteFromPanel() {
-        settings.muted.toggle()
-        syncMenuState()
-
         ensureConnectedThen { [weak self] in
             guard let self else { return }
-            self.webOSClient.setMuted(self.settings.muted) { result in
+            let previousMuted = self.settings.muted
+            let targetMuted = !previousMuted
+            self.muteCommandGeneration += 1
+            let generation = self.muteCommandGeneration
+            self.settings.muted = targetMuted
+            self.syncMenuState()
+            self.webOSClient.setMuted(targetMuted) { result in
                 DispatchQueue.main.async {
-                    self.handleCommandResult(result, success: self.settings.muted ? self.text(.turnMuteOn) : self.text(.turnMuteOff))
+                    guard self.muteCommandGeneration == generation else { return }
+                    if case .failure = result {
+                        self.settings.muted = previousMuted
+                        self.syncMenuState()
+                    }
+                    self.handleCommandResult(result, success: targetMuted ? self.text(.turnMuteOn) : self.text(.turnMuteOff))
                 }
             }
         }
@@ -209,8 +252,11 @@ final class AppCoordinator: ObservableObject {
     func switchHDMIFromPanel(index: Int) {
         ensureConnectedThen { [weak self] in
             guard let self else { return }
+            self.hdmiCommandGeneration += 1
+            let generation = self.hdmiCommandGeneration
             self.webOSClient.switchHDMI(index) { result in
                 DispatchQueue.main.async {
+                    guard self.hdmiCommandGeneration == generation else { return }
                     let name = self.settings.hdmiName(index)
                     if case .success = result {
                         self.selectedHDMIIndex = index
@@ -222,41 +268,136 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func connect(showPairingPrompt: Bool) {
+        if webOSClient.isConnected {
+            runPendingConnectionActions()
+            return
+        }
+        guard !isConnecting else {
+            return
+        }
         guard !settings.tvIP.isEmpty else {
+            failPendingConnectionActions()
             status = text(.currentDisconnected)
             showSettings()
             return
         }
 
+        isConnecting = true
         status = showPairingPrompt ? text(.connectPrompt) : "\(text(.startPairing)) \(settings.tvIP)..."
         webOSClient.connect(ip: settings.tvIP, clientKey: settings.clientKey, forcePairing: showPairingPrompt) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.isConnecting = false
                 switch result {
                 case .success(let clientKey):
                     self.settings.clientKey = clientKey
                     self.status = "\(self.text(.connected)) \(self.settings.tvName)"
-                    self.refreshVolume()
+                    self.requestCurrentHDMI()
+                    if self.pendingConnectionActions.isEmpty {
+                        self.requestVolume()
+                    } else {
+                        self.runPendingConnectionActions()
+                    }
                 case .failure(let message):
+                    self.failPendingConnectionActions()
                     self.selectedHDMIIndex = nil
                     self.status = message
-                    self.settingsWindowController.updateOutput(message)
                 }
             }
         }
     }
 
-    private func ensureConnectedThen(_ action: @escaping () -> Void) {
+    private func ensureConnectedThen(_ action: @escaping () -> Void, onFailure: @escaping () -> Void = {}) {
         if webOSClient.isConnected {
             action()
             return
         }
 
+        pendingConnectionActions.append(PendingConnectionAction(run: action, fail: onFailure))
         connect(showPairingPrompt: settings.clientKey.isEmpty)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            if self.webOSClient.isConnected {
-                action()
+    }
+
+    private func runPendingConnectionActions() {
+        let actions = pendingConnectionActions
+        pendingConnectionActions.removeAll()
+        for action in actions {
+            action.run()
+        }
+    }
+
+    private func failPendingConnectionActions() {
+        let actions = pendingConnectionActions
+        pendingConnectionActions.removeAll()
+        for action in actions {
+            action.fail()
+        }
+    }
+
+    private func processPendingVolumeTarget() {
+        guard !volumeCommandInFlight, let target = pendingVolumeTarget else {
+            return
+        }
+        pendingVolumeTarget = nil
+        volumeCommandInFlight = true
+        volumeCommandGeneration += 1
+        let generation = volumeCommandGeneration
+        activeVolumeCommandGeneration = generation
+        ensureConnectedThen({ [weak self] in
+            self?.performVolumeCommand(target: target, generation: generation)
+        }, onFailure: { [weak self] in
+            self?.pendingVolumeTarget = nil
+            self?.volumeCommandInFlight = false
+            self?.activeVolumeCommandGeneration = nil
+        })
+    }
+
+    private func performVolumeCommand(target: Int, generation: Int) {
+        guard activeVolumeCommandGeneration == generation else {
+            return
+        }
+        let delta = target - settings.volume
+        settings.volume = target
+        settings.muted = false
+        syncMenuState()
+
+        if abs(delta) > 5 {
+            webOSClient.setVolume(target) { [weak self] directResult in
+                guard let self else { return }
+                guard self.activeVolumeCommandGeneration == generation else { return }
+                if case .success = directResult {
+                    DispatchQueue.main.async { self.finishVolumeCommand(directResult, target: target, generation: generation) }
+                } else {
+                    self.webOSClient.changeVolume(delta: delta) { stepResult in
+                        DispatchQueue.main.async { self.finishVolumeCommand(stepResult, target: target, generation: generation) }
+                    }
+                }
             }
+        } else {
+            webOSClient.changeVolume(delta: delta) { [weak self] stepResult in
+                guard let self else { return }
+                guard self.activeVolumeCommandGeneration == generation else { return }
+                if case .success = stepResult {
+                    DispatchQueue.main.async { self.finishVolumeCommand(stepResult, target: target, generation: generation) }
+                } else {
+                    self.webOSClient.setVolume(target) { directResult in
+                        DispatchQueue.main.async { self.finishVolumeCommand(directResult, target: target, generation: generation) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func finishVolumeCommand(_ result: LGResult<Void>, target: Int, generation: Int) {
+        guard activeVolumeCommandGeneration == generation else {
+            return
+        }
+        handleCommandResult(result, success: "\(text(.volume)) \(target)%")
+        volumeCommandInFlight = false
+        activeVolumeCommandGeneration = nil
+        if pendingVolumeTarget != nil {
+            processPendingVolumeTarget()
+        } else {
+            requestVolume()
         }
     }
 
@@ -267,10 +408,8 @@ final class AppCoordinator: ObservableObject {
             settings.muted = volumeStatus.muted
             status = "\(text(.syncedVolume)) \(volumeStatus.volume)%"
             syncMenuState()
-            settingsWindowController.updateOutput("volume=\(volumeStatus.volume), muted=\(volumeStatus.muted)")
         case .failure(let message):
             status = message
-            settingsWindowController.updateOutput(message)
         }
     }
 
@@ -280,8 +419,17 @@ final class AppCoordinator: ObservableObject {
             status = success
         case .failure(let message):
             status = message
-            settingsWindowController.updateOutput(message)
         }
+    }
+
+    private func handleConnectionStateChanged(_ connected: Bool) {
+        connectionState = connected
+        guard !connected, !isConnecting else {
+            return
+        }
+        selectedHDMIIndex = nil
+        resetActiveCommands()
+        status = text(.currentDisconnected)
     }
 
     private func adjustVolumeByKeyboard(delta: Int) {
@@ -289,7 +437,8 @@ final class AppCoordinator: ObservableObject {
     }
 
     func adjustVolumeFromPanel(delta: Int) {
-        let target = min(max(settings.volume + delta, 0), 100)
+        let baseVolume = pendingVolumeTarget ?? settings.volume
+        let target = min(max(baseVolume + delta, 0), 100)
         setVolumeFromPanel(target)
     }
 
@@ -310,5 +459,34 @@ final class AppCoordinator: ObservableObject {
         menuMuted = settings.muted
         menuHDMINames = settings.hdmiNames
         menuLanguageMode = settings.languageMode
+    }
+
+    private func requestCurrentHDMI() {
+        webOSClient.getCurrentHDMI { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if case .success(let index) = result {
+                    self.selectedHDMIIndex = index
+                }
+            }
+        }
+    }
+
+    private func resetActiveCommands() {
+        pendingVolumeTarget = nil
+        volumeCommandInFlight = false
+        activeVolumeCommandGeneration = nil
+        muteCommandGeneration += 1
+        hdmiCommandGeneration += 1
+    }
+
+    private func getSettingsWindowController() -> SettingsWindowController {
+        if let settingsWindowController {
+            return settingsWindowController
+        }
+        let controller = SettingsWindowController(settings: settings, coordinator: self)
+        controller.updateDevices(discoveredDevices)
+        settingsWindowController = controller
+        return controller
     }
 }

@@ -13,6 +13,11 @@ let package = Package(
         .executableTarget(
             name: "LGVolume",
             path: "Sources/LGVolume"
+        ),
+        .testTarget(
+            name: "LGVolumeTests",
+            dependencies: ["LGVolume"],
+            path: "Tests/LGVolumeTests"
         )
     ]
 )

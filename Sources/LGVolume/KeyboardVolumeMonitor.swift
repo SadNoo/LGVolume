@@ -1,20 +1,20 @@
 import AppKit
-import ApplicationServices
 import Carbon.HIToolbox
 
 final class KeyboardVolumeMonitor {
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var hotKeyRefs: [EventHotKeyRef?] = []
+    private var volumeHotKeyRefs: [EventHotKeyRef] = []
     private var eventHandlerRef: EventHandlerRef?
     private var activeHDMIShortcuts: [KeyboardShortcut?] = []
+    private var lastHDMITriggerTime = Date.distantPast
     private let onVolumeDown: () -> Void
     private let onVolumeUp: () -> Void
     private let onMute: () -> Void
     private let hdmiShortcuts: () -> [KeyboardShortcut?]
     private let onHDMIShortcut: (Int) -> Void
-    private let shouldPromptForAccessibility: () -> Bool
-    private let markAccessibilityPromptShown: () -> Void
+    private let onShortcutRegistrationChanged: ([Bool]) -> Void
 
     init(
         onVolumeDown: @escaping () -> Void,
@@ -22,21 +22,22 @@ final class KeyboardVolumeMonitor {
         onMute: @escaping () -> Void,
         hdmiShortcuts: @escaping () -> [KeyboardShortcut?],
         onHDMIShortcut: @escaping (Int) -> Void,
-        shouldPromptForAccessibility: @escaping () -> Bool,
-        markAccessibilityPromptShown: @escaping () -> Void
+        onShortcutRegistrationChanged: @escaping ([Bool]) -> Void
     ) {
         self.onVolumeDown = onVolumeDown
         self.onVolumeUp = onVolumeUp
         self.onMute = onMute
         self.hdmiShortcuts = hdmiShortcuts
         self.onHDMIShortcut = onHDMIShortcut
-        self.shouldPromptForAccessibility = shouldPromptForAccessibility
-        self.markAccessibilityPromptShown = markAccessibilityPromptShown
+        self.onShortcutRegistrationChanged = onShortcutRegistrationChanged
     }
 
     func start() {
-        requestAccessibilityPermission()
+        guard globalMonitor == nil, localMonitor == nil else {
+            return
+        }
         installHotKeyHandler()
+        registerVolumeHotKeys()
         updateHDMIShortcuts(hdmiShortcuts())
 
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .systemDefined]) { [weak self] event in
@@ -58,6 +59,7 @@ final class KeyboardVolumeMonitor {
         }
 
         unregisterHDMIHotKeys()
+        unregisterVolumeHotKeys()
         hotKeyRefs = Array(repeating: nil, count: activeHDMIShortcuts.count)
 
         for (offset, shortcut) in activeHDMIShortcuts.enumerated() {
@@ -79,6 +81,11 @@ final class KeyboardVolumeMonitor {
                 hotKeyRefs[offset] = hotKeyRef
             }
         }
+
+        let states = activeHDMIShortcuts.enumerated().map { offset, shortcut in
+            shortcut == nil || hotKeyRefs[offset] != nil
+        }
+        onShortcutRegistrationChanged(states)
     }
 
     deinit {
@@ -100,15 +107,29 @@ final class KeyboardVolumeMonitor {
         }
 
         for (offset, shortcut) in activeHDMIShortcuts.enumerated() {
+            if hotKeyRefs.indices.contains(offset), hotKeyRefs[offset] != nil {
+                continue
+            }
             guard let shortcut, shortcut.matches(event) else {
                 continue
+            }
+            if event.isARepeat {
+                return true
             }
             onHDMIShortcut(offset + 1)
             return true
         }
 
+        let commandModifiers = event.modifierFlags.intersection([.command, .option, .control])
+        guard commandModifiers.isEmpty else {
+            return false
+        }
+
         switch event.keyCode {
         case 109:
+            if event.isARepeat {
+                return true
+            }
             onMute()
             return true
         case 103:
@@ -149,19 +170,6 @@ final class KeyboardVolumeMonitor {
         }
     }
 
-    private func requestAccessibilityPermission() {
-        guard !AXIsProcessTrusted() else {
-            return
-        }
-        guard shouldPromptForAccessibility() else {
-            return
-        }
-
-        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-        markAccessibilityPromptShown()
-    }
-
     private func installHotKeyHandler() {
         guard eventHandlerRef == nil else {
             return
@@ -191,7 +199,7 @@ final class KeyboardVolumeMonitor {
                 }
 
                 let monitor = Unmanaged<KeyboardVolumeMonitor>.fromOpaque(userData).takeUnretainedValue()
-                monitor.handleHDMIHotKey(id: hotKeyID.id)
+                monitor.handleRegisteredHotKey(id: hotKeyID.id)
                 return noErr
             },
             1,
@@ -201,10 +209,26 @@ final class KeyboardVolumeMonitor {
         )
     }
 
-    private func handleHDMIHotKey(id: UInt32) {
-        guard (1...4).contains(Int(id)) else {
+    private func handleRegisteredHotKey(id: UInt32) {
+        switch id {
+        case 10:
+            DispatchQueue.main.async { self.onMute() }
+            return
+        case 11:
+            DispatchQueue.main.async { self.onVolumeDown() }
+            return
+        case 12:
+            DispatchQueue.main.async { self.onVolumeUp() }
+            return
+        default:
+            break
+        }
+        guard (1...4).contains(Int(id)) else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastHDMITriggerTime) >= 0.25 else {
             return
         }
+        lastHDMITriggerTime = now
         DispatchQueue.main.async {
             self.onHDMIShortcut(Int(id))
         }
@@ -217,6 +241,31 @@ final class KeyboardVolumeMonitor {
             }
         }
         hotKeyRefs.removeAll()
+    }
+
+    private func registerVolumeHotKeys() {
+        unregisterVolumeHotKeys()
+        for (id, keyCode) in [(10, 109), (11, 103), (12, 111)] {
+            var hotKeyRef: EventHotKeyRef?
+            let hotKeyID = EventHotKeyID(signature: Self.hotKeySignature, id: UInt32(id))
+            if RegisterEventHotKey(
+                UInt32(keyCode),
+                0,
+                hotKeyID,
+                GetApplicationEventTarget(),
+                0,
+                &hotKeyRef
+            ) == noErr, let hotKeyRef {
+                volumeHotKeyRefs.append(hotKeyRef)
+            }
+        }
+    }
+
+    private func unregisterVolumeHotKeys() {
+        for hotKeyRef in volumeHotKeyRefs {
+            UnregisterEventHotKey(hotKeyRef)
+        }
+        volumeHotKeyRefs.removeAll()
     }
 
     private static let hotKeySignature: OSType = {

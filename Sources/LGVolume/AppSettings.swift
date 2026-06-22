@@ -1,7 +1,11 @@
 import Foundation
 
 final class AppSettings {
-    private let defaults = UserDefaults(suiteName: "local.codex.lgvolume") ?? .standard
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = UserDefaults(suiteName: "local.codex.lgvolume") ?? .standard) {
+        self.defaults = defaults
+    }
 
     private enum Key {
         static let tvIP = "tvIP"
@@ -13,7 +17,6 @@ final class AppSettings {
         static let hdmiShortcutPrefix = "hdmiShortcut"
         static let appearanceMode = "appearanceMode"
         static let launchAtLogin = "launchAtLogin"
-        static let accessibilityPromptShown = "accessibilityPromptShown"
         static let languageMode = "languageMode"
     }
 
@@ -68,6 +71,9 @@ final class AppSettings {
         guard let raw = defaults.string(forKey: "\(Key.hdmiShortcutPrefix)\(index)") else {
             return KeyboardShortcut.defaultHDMIShortcut(index: index)
         }
+        if raw == "disabled" {
+            return nil
+        }
         return KeyboardShortcut(storageValue: raw) ?? KeyboardShortcut.defaultHDMIShortcut(index: index)
     }
 
@@ -76,7 +82,7 @@ final class AppSettings {
         if let shortcut {
             defaults.set(shortcut.storageValue, forKey: key)
         } else {
-            defaults.removeObject(forKey: key)
+            defaults.set("disabled", forKey: key)
         }
     }
 
@@ -107,11 +113,6 @@ final class AppSettings {
     var launchAtLogin: Bool {
         get { defaults.bool(forKey: Key.launchAtLogin) }
         set { defaults.set(newValue, forKey: Key.launchAtLogin) }
-    }
-
-    var accessibilityPromptShown: Bool {
-        get { defaults.bool(forKey: Key.accessibilityPromptShown) }
-        set { defaults.set(newValue, forKey: Key.accessibilityPromptShown) }
     }
 
     var languageMode: String {

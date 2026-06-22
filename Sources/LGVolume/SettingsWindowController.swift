@@ -32,6 +32,19 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
                 return .shortcuts
             }
         }
+
+        var subtitleKey: L10n.Key {
+            switch self {
+            case .general:
+                return .generalSubtitle
+            case .preferences:
+                return .preferencesSubtitle
+            case .hdmi:
+                return .hdmiSubtitle
+            case .shortcuts:
+                return .shortcutsSubtitle
+            }
+        }
     }
 
     private let settings: AppSettings
@@ -58,13 +71,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let saveButton = NSButton(title: "", target: nil, action: nil)
     private let syncVolumeButton = NSButton(title: "", target: nil, action: nil)
     private let restoreHDMIShortcutsButton = NSButton(title: "", target: nil, action: nil)
-    private var devices: [DiscoveredTV] = []
+    private var renderedLanguageMode: String?
+    private var hasLoadedEditableValues = false
 
     init(settings: AppSettings, coordinator: AppCoordinator) {
         self.settings = settings
         self.coordinator = coordinator
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 410),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 390),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -81,26 +95,26 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     }
 
     func refresh() {
-        ipField.stringValue = settings.tvIP
-        nameField.stringValue = settings.tvName
-        for (offset, field) in hdmiNameFields.enumerated() {
-            field.stringValue = settings.hdmiName(offset + 1)
-        }
-        for (offset, field) in hdmiShortcutFields.enumerated() {
-            field.shortcut = settings.hdmiShortcut(offset + 1)
-            field.placeholderString = t(.notSet)
+        if !hasLoadedEditableValues {
+            loadEditableValues()
         }
         launchAtLoginButton.state = coordinator?.launchAtLogin == true ? .on : .off
         updateAppearanceSelection()
         updateLanguageSelection()
-        refreshLocalizedText()
+        updatePageButtons()
+        updateShortcutStatus()
+        if renderedLanguageMode != settings.languageMode {
+            refreshLocalizedText()
+        } else {
+            updateStatus()
+        }
         updateIPFeedback()
-        updateStatus(coordinator?.status ?? t(.currentDisconnected))
     }
 
     func refreshLocalizedText() {
+        renderedLanguageMode = settings.languageMode
         window?.title = "LGVolume \(t(.settings))"
-        pageSubtitleLabel.stringValue = t(.generalSubtitle)
+        pageSubtitleLabel.stringValue = t(selectedPage.subtitleKey)
 
         for page in SettingsPage.allCases {
             pageButtons[page]?.title = t(page.tabKey)
@@ -124,14 +138,18 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         syncVolumeButton.title = t(.syncVolume)
         restoreHDMIShortcutsButton.title = t(.restoreHDMIShortcuts)
         for field in hdmiShortcutFields {
+            field.recordingPlaceholder = t(.pressShortcut)
+            field.emptyPlaceholder = t(.notSet)
+            field.invalidPlaceholder = t(.shortcutNeedsModifier)
             field.placeholderString = t(.notSet)
         }
+        updateShortcutStatus()
 
         renderCurrentPage()
-        updateStatus(coordinator?.status ?? t(.currentDisconnected))
+        updateStatus()
     }
 
-    func updateStatus(_ status: String) {
+    func updateStatus() {
         let connected = coordinator?.isConnected == true
         let volume = coordinator?.currentVolume ?? settings.volume
         let muted = coordinator?.isMuted ?? settings.muted
@@ -146,14 +164,16 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         }
     }
 
-    func updateOutput(_ output: String) {
-    }
-
     func updateDevices(_ devices: [DiscoveredTV]) {
-        self.devices = devices
         if let first = devices.first, ipField.stringValue.isEmpty {
             ipField.placeholderString = first.ip
         }
+    }
+
+    func updateShortcutStatus() {
+        let shortcutsAvailable = coordinator?.shortcutRegistrationStates.allSatisfy { $0 } == true
+        shortcutStateLabel.stringValue = t(shortcutsAvailable ? .shortcutsEnabled : .shortcutsUnavailable)
+        shortcutStateLabel.textColor = shortcutsAvailable ? .secondaryLabelColor : .systemOrange
     }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -169,21 +189,21 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         ipField.delegate = self
         configureTextField(ipField)
         configureTextField(nameField)
-        ipField.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        ipField.widthAnchor.constraint(equalToConstant: 420).isActive = true
         ipField.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        nameField.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        nameField.widthAnchor.constraint(equalToConstant: 420).isActive = true
         nameField.heightAnchor.constraint(equalToConstant: 32).isActive = true
 
         for field in hdmiNameFields {
             field.placeholderString = "HDMI"
             configureTextField(field)
-            field.widthAnchor.constraint(equalToConstant: 220).isActive = true
+            field.widthAnchor.constraint(equalToConstant: 420).isActive = true
             field.heightAnchor.constraint(equalToConstant: 32).isActive = true
         }
 
         for field in hdmiShortcutFields {
             field.alignment = .center
-            field.widthAnchor.constraint(equalToConstant: 220).isActive = true
+            field.widthAnchor.constraint(equalToConstant: 360).isActive = true
         }
 
         appearanceControl.target = self
@@ -261,32 +281,19 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         root.addArrangedSubview(contentContainer)
         NSLayoutConstraint.activate([
             contentContainer.widthAnchor.constraint(equalTo: root.widthAnchor),
-            contentContainer.heightAnchor.constraint(equalToConstant: 222)
+            contentContainer.heightAnchor.constraint(equalToConstant: 260)
         ])
 
-        let bottomSeparator = separatorLine()
-        root.addArrangedSubview(bottomSeparator)
-        bottomSeparator.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-
-        let footer = NSStackView()
-        footer.orientation = .horizontal
-        footer.alignment = .centerY
-        footer.spacing = 10
-        footer.edgeInsets = NSEdgeInsets(top: 8, left: 32, bottom: 10, right: 32)
-        footer.addArrangedSubview(spacer())
-        footer.addArrangedSubview(saveButton)
-        root.addArrangedSubview(footer)
-        footer.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-
-        refreshLocalizedText()
         refresh()
     }
 
     private func tabButton(page: SettingsPage) -> NSButton {
         let button = NSButton(title: t(page.tabKey), target: self, action: #selector(changePage(_:)))
         button.tag = SettingsPage.allCases.firstIndex(of: page) ?? 0
-        button.bezelStyle = .rounded
+        button.isBordered = false
         button.setButtonType(.toggle)
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 7
         button.widthAnchor.constraint(equalToConstant: 150).isActive = true
         button.heightAnchor.constraint(equalToConstant: 34).isActive = true
         return button
@@ -294,6 +301,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private func renderCurrentPage() {
         pageTitleLabel.stringValue = t(selectedPage.titleKey)
+        pageSubtitleLabel.stringValue = t(selectedPage.subtitleKey)
         updatePageButtons()
 
         contentContainer.subviews.forEach { $0.removeFromSuperview() }
@@ -312,8 +320,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         contentContainer.addSubview(pageView)
         pageView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            pageView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 32),
-            pageView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -32),
+            pageView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 24),
+            pageView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -24),
             pageView.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 10),
             pageView.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor, constant: -10)
         ])
@@ -321,8 +329,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private func updatePageButtons() {
         for (page, button) in pageButtons {
-            button.state = page == selectedPage ? .on : .off
-            button.contentTintColor = page == selectedPage ? .controlAccentColor : .labelColor
+            let selected = page == selectedPage
+            button.state = selected ? .on : .off
+            button.layer?.backgroundColor = (selected ? NSColor.controlAccentColor : NSColor.controlColor).cgColor
+            button.contentTintColor = selected ? .white : .labelColor
         }
     }
 
@@ -354,11 +364,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         statusRow.addArrangedSubview(volumeStack)
         stack.addArrangedSubview(statusRow)
 
-        stack.addArrangedSubview(separatorLine(width: 660))
+        stack.addArrangedSubview(separatorLine(width: 620))
 
         let grid = NSGridView(views: [
-            [fixedLabel("LG TV IP:"), ipField, ipFeedbackLabel],
-            [fixedLabel(.displayName), nameField, NSView()]
+            [fixedLabel("LG TV IP:"), ipField],
+            [fixedLabel(.displayName), nameField]
         ])
         grid.rowSpacing = 10
         grid.columnSpacing = 10
@@ -369,8 +379,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         ipFeedbackLabel.font = .systemFont(ofSize: 12, weight: .medium)
         stack.addArrangedSubview(grid)
 
+        let feedbackRow = row()
+        feedbackRow.addArrangedSubview(spacer(width: 130))
+        feedbackRow.addArrangedSubview(ipFeedbackLabel)
+        stack.addArrangedSubview(feedbackRow)
+
         let actionRow = row()
-        actionRow.addArrangedSubview(spacer(width: 134))
+        actionRow.addArrangedSubview(spacer(width: 130))
+        actionRow.addArrangedSubview(saveButton)
         actionRow.addArrangedSubview(connectButton)
         actionRow.addArrangedSubview(syncVolumeButton)
         stack.addArrangedSubview(actionRow)
@@ -402,12 +418,18 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private func hdmiPage() -> NSView {
         let stack = pageStack()
         let grid = NSGridView(views: [
-            [fixedLabel("HDMI1:"), hdmiNameFields[0], fixedLabel("HDMI2:"), hdmiNameFields[1]],
-            [fixedLabel("HDMI3:"), hdmiNameFields[2], fixedLabel("HDMI4:"), hdmiNameFields[3]]
+            [fixedLabel("HDMI1:"), hdmiNameFields[0]],
+            [fixedLabel("HDMI2:"), hdmiNameFields[1]],
+            [fixedLabel("HDMI3:"), hdmiNameFields[2]],
+            [fixedLabel("HDMI4:"), hdmiNameFields[3]]
         ])
-        grid.rowSpacing = 14
-        grid.columnSpacing = 12
+        grid.rowSpacing = 10
+        grid.columnSpacing = 10
         stack.addArrangedSubview(grid)
+        let actionRow = row()
+        actionRow.addArrangedSubview(spacer(width: 130))
+        actionRow.addArrangedSubview(saveButton)
+        stack.addArrangedSubview(actionRow)
         return pageBox(stack)
     }
 
@@ -424,18 +446,21 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         summaryRow.addArrangedSubview(shortcutStateLabel)
         stack.addArrangedSubview(summaryRow)
 
-        stack.addArrangedSubview(separatorLine(width: 660))
+        stack.addArrangedSubview(separatorLine(width: 620))
 
         let grid = NSGridView(views: [
-            [fixedLabel(.hdmiShortcut1), hdmiShortcutFields[0], fixedLabel(.hdmiShortcut2), hdmiShortcutFields[1]],
-            [fixedLabel(.hdmiShortcut3), hdmiShortcutFields[2], fixedLabel(.hdmiShortcut4), hdmiShortcutFields[3]]
+            [fixedLabel(.hdmiShortcut1), hdmiShortcutFields[0]],
+            [fixedLabel(.hdmiShortcut2), hdmiShortcutFields[1]],
+            [fixedLabel(.hdmiShortcut3), hdmiShortcutFields[2]],
+            [fixedLabel(.hdmiShortcut4), hdmiShortcutFields[3]]
         ])
-        grid.rowSpacing = 14
-        grid.columnSpacing = 12
+        grid.rowSpacing = 10
+        grid.columnSpacing = 10
         stack.addArrangedSubview(grid)
 
         let restoreRow = row()
-        restoreRow.addArrangedSubview(spacer(width: 134))
+        restoreRow.addArrangedSubview(spacer(width: 130))
+        restoreRow.addArrangedSubview(saveButton)
         restoreRow.addArrangedSubview(restoreHDMIShortcutsButton)
         stack.addArrangedSubview(restoreRow)
 
@@ -446,8 +471,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 22, left: 22, bottom: 18, right: 22)
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 16, right: 18)
         return stack
     }
 
@@ -482,7 +507,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let field = label(t(key))
         field.alignment = .right
         field.font = .systemFont(ofSize: 15, weight: .medium)
-        field.widthAnchor.constraint(equalToConstant: 124).isActive = true
+        field.widthAnchor.constraint(equalToConstant: 120).isActive = true
         field.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
         return field
     }
@@ -491,7 +516,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let field = label(text)
         field.alignment = .right
         field.font = .systemFont(ofSize: 15, weight: .medium)
-        field.widthAnchor.constraint(equalToConstant: 124).isActive = true
+        field.widthAnchor.constraint(equalToConstant: 120).isActive = true
         field.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
         return field
     }
@@ -554,6 +579,18 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         }
     }
 
+    private func loadEditableValues() {
+        ipField.stringValue = settings.tvIP
+        nameField.stringValue = settings.tvName
+        for (offset, field) in hdmiNameFields.enumerated() {
+            field.stringValue = settings.hdmiName(offset + 1)
+        }
+        for (offset, field) in hdmiShortcutFields.enumerated() {
+            field.shortcut = settings.hdmiShortcut(offset + 1)
+        }
+        hasLoadedEditableValues = true
+    }
+
     private func updateIPFeedback(text: String? = nil) {
         if let text {
             ipFeedbackLabel.stringValue = text
@@ -564,23 +601,19 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let ip = ipField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !ip.isEmpty else {
             ipFeedbackLabel.stringValue = ""
+            connectButton.isEnabled = coordinator?.isConnected == true
+            saveButton.isEnabled = true
             return
         }
 
-        if isValidIPv4(ip) {
+        let valid = LocalNetworkAddress.isAllowedIPv4(ip)
+        connectButton.isEnabled = coordinator?.isConnected == true || valid
+        saveButton.isEnabled = ip.isEmpty || valid
+        if valid {
             ipFeedbackLabel.stringValue = ""
         } else {
             ipFeedbackLabel.stringValue = t(.invalidIP)
             ipFeedbackLabel.textColor = .systemOrange
-        }
-    }
-
-    private func isValidIPv4(_ ip: String) -> Bool {
-        let parts = ip.split(separator: ".")
-        guard parts.count == 4 else { return false }
-        return parts.allSatisfy { part in
-            guard let value = Int(part), value >= 0, value <= 255 else { return false }
-            return String(value) == part || part == "0"
         }
     }
 
@@ -634,13 +667,25 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     }
 
     @objc private func save() {
+        _ = commitSettings()
+    }
+
+    private func commitSettings() -> Bool {
+        let ip = ipField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ip.isEmpty || LocalNetworkAddress.isAllowedIPv4(ip) else {
+            updateIPFeedback()
+            NSSound.beep()
+            return false
+        }
         coordinator?.saveSettings(
-            ip: ipField.stringValue,
+            ip: ip,
             name: nameField.stringValue,
             hdmiNames: hdmiNameFields.map(\.stringValue),
             hdmiShortcuts: hdmiShortcutFields.map(\.shortcut)
         )
+        loadEditableValues()
         updateIPFeedback(text: t(.saveSuccess))
+        return true
     }
 
     @objc private func restoreHDMIShortcuts() {
@@ -652,7 +697,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     }
 
     @objc private func connectOrDisconnect() {
-        save()
+        guard commitSettings() else { return }
         if coordinator?.isConnected == true {
             coordinator?.disconnect()
         } else {
@@ -661,7 +706,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     }
 
     @objc private func refreshVolume() {
-        save()
+        guard commitSettings() else { return }
         coordinator?.refreshVolume()
     }
 }
