@@ -22,6 +22,11 @@ final class VisualPreviewTests: XCTestCase {
         settingsView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         let settingsSize = NSSize(width: 720, height: 390)
         try render(settingsView, size: settingsSize, to: outputDirectory.appendingPathComponent("settings-general.png"))
+        settingsWindow.appearance = NSAppearance(named: .darkAqua)
+        settingsController.refresh()
+        try render(settingsView, size: settingsSize, to: outputDirectory.appendingPathComponent("settings-general-dark.png"))
+        settingsWindow.appearance = NSAppearance(named: .aqua)
+        settingsController.refresh()
         for (title, filename) in [
             (L10n.text(.misc, languageMode: settings.languageMode), "settings-preferences.png"),
             (L10n.text(.hdmi, languageMode: settings.languageMode), "settings-hdmi.png"),

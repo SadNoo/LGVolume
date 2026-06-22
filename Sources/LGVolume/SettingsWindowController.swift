@@ -330,8 +330,17 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private func updatePageButtons() {
         for (page, button) in pageButtons {
             let selected = page == selectedPage
+            let isDark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let idleBackground = isDark
+                ? NSColor.white.withAlphaComponent(0.08)
+                : NSColor.black.withAlphaComponent(0.06)
+            let idleBorder = isDark
+                ? NSColor.white.withAlphaComponent(0.10)
+                : NSColor.black.withAlphaComponent(0.08)
             button.state = selected ? .on : .off
-            button.layer?.backgroundColor = (selected ? NSColor.controlAccentColor : NSColor.controlColor).cgColor
+            button.layer?.backgroundColor = (selected ? NSColor.controlAccentColor : idleBackground).cgColor
+            button.layer?.borderColor = (selected ? NSColor.clear : idleBorder).cgColor
+            button.layer?.borderWidth = selected ? 0 : 0.5
             button.contentTintColor = selected ? .white : .labelColor
         }
     }
