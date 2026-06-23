@@ -2,8 +2,6 @@ import SwiftUI
 
 struct MenuBarControlView: View {
     @ObservedObject var coordinator: AppCoordinator
-    @State private var sliderVolume = 50.0
-    @State private var isSliding = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -14,16 +12,6 @@ struct MenuBarControlView: View {
         .padding(.horizontal, 12)
         .padding(.top, 14)
         .padding(.bottom, 12)
-        .background {
-            SingleLayerPanelSheen()
-        }
-        .onAppear {
-            sliderVolume = Double(coordinator.menuVolume)
-        }
-        .onChange(of: coordinator.menuVolume) { _, newValue in
-            guard !isSliding else { return }
-            sliderVolume = Double(newValue)
-        }
     }
 
     private var header: some View {
@@ -33,13 +21,9 @@ struct MenuBarControlView: View {
                 .foregroundStyle(coordinator.isConnected ? .primary : .secondary)
                 .lineLimit(1)
 
-            Circle()
-                .fill(statusColor)
-                .frame(width: 7, height: 7)
-                .overlay {
-                    Circle()
-                        .stroke(Color.white.opacity(0.42), lineWidth: 0.8)
-                }
+            Image(systemName: "circle.fill")
+                .font(.system(size: 7, weight: .semibold))
+                .foregroundStyle(statusColor)
                 .accessibilityLabel(coordinator.isConnected ? coordinator.text(.connected) : coordinator.text(.currentDisconnected))
 
             Spacer(minLength: 8)
@@ -47,82 +31,59 @@ struct MenuBarControlView: View {
     }
 
     private var volumeControls: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 7) {
-                Button {
-                    coordinator.toggleMuteFromPanel()
-                } label: {
-                    Image(systemName: coordinator.menuMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 22, height: 24)
-                }
-                .buttonStyle(.plain)
-                .disabled(!coordinator.isConnected)
-                .accessibilityLabel(coordinator.menuMuted ? coordinator.text(.turnMuteOff) : coordinator.text(.turnMuteOn))
-
-                Text(coordinator.text(.volume))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 4)
-
-                Text(displayVolumeText)
-                    .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
-                    .contentTransition(.numericText())
+        HStack(spacing: 7) {
+            Button {
+                coordinator.toggleMuteFromPanel()
+            } label: {
+                Image(systemName: coordinator.menuMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 22, height: 24)
             }
+            .buttonStyle(.plain)
+            .disabled(!coordinator.isConnected)
+            .accessibilityLabel(coordinator.menuMuted ? coordinator.text(.turnMuteOff) : coordinator.text(.turnMuteOn))
 
-            HStack(spacing: 6) {
-                Image(systemName: coordinator.menuMuted ? "speaker.slash.fill" : "speaker.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 12)
+            Text(coordinator.text(.volume))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
 
-                VolumeTrack(
-                    value: $sliderVolume,
-                    disabled: coordinator.menuMuted || !coordinator.isConnected,
-                    onEditingChanged: { editing in
-                        isSliding = editing
-                        if !editing {
-                            coordinator.setVolumeFromPanel(Int(sliderVolume.rounded()))
-                        }
-                    }
-                )
+            Spacer(minLength: 4)
 
-                Image(systemName: "speaker.wave.3.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 14)
-            }
-            .controlSize(.mini)
+            Text(displayVolumeText)
+                .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
+                .contentTransition(.numericText())
         }
     }
 
     private var actionList: some View {
         VStack(spacing: 7) {
             ForEach(0..<4, id: \.self) { index in
+                let selected = coordinator.selectedHDMIIndex == index + 1
                 Button {
                     coordinator.switchHDMIFromPanel(index: index + 1)
                 } label: {
-                    HDMIButtonLabel(
-                        title: coordinator.menuHDMINames[safe: index] ?? "HDMI\(index + 1)",
-                        isSelected: coordinator.selectedHDMIIndex == index + 1
+                    Label(
+                        coordinator.menuHDMINames[safe: index] ?? "HDMI\(index + 1)",
+                        systemImage: selected ? "checkmark.circle.fill" : "circle"
                     )
+                    .frame(maxWidth: .infinity, minHeight: 26)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .tint(selected ? .accentColor : nil)
                 .disabled(!coordinator.isConnected)
-                .opacity(coordinator.isConnected ? 1 : 0.48)
             }
 
             if !coordinator.isConnected {
                 Button {
                     coordinator.reconnect()
                 } label: {
-                    FooterActionLabel(
-                        title: coordinator.isConnecting ? coordinator.text(.startPairing) : coordinator.text(.pairConnect),
-                        symbol: coordinator.isConnecting ? "arrow.triangle.2.circlepath" : "link"
+                    Label(
+                        coordinator.isConnecting ? coordinator.text(.startPairing) : coordinator.text(.pairConnect),
+                        systemImage: coordinator.isConnecting ? "arrow.triangle.2.circlepath" : "link"
                     )
+                    .frame(maxWidth: .infinity, minHeight: 26)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
                 .disabled(coordinator.isConnecting)
             }
 
@@ -131,17 +92,19 @@ struct MenuBarControlView: View {
             Button {
                 coordinator.showSettings()
             } label: {
-                FooterActionLabel(title: coordinator.text(.settings), symbol: "gearshape")
+                Label(coordinator.text(.settings), systemImage: "gearshape")
+                    .frame(maxWidth: .infinity, minHeight: 26)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
             .keyboardShortcut(",", modifiers: .command)
 
             Button {
                 coordinator.quit()
             } label: {
-                FooterActionLabel(title: coordinator.text(.quit), symbol: "power", isSecondary: true)
+                Label(coordinator.text(.quit), systemImage: "power")
+                    .frame(maxWidth: .infinity, minHeight: 26)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
             .keyboardShortcut("q", modifiers: .command)
         }
     }
@@ -167,133 +130,7 @@ struct MenuBarControlView: View {
         if coordinator.menuMuted {
             return coordinator.text(.muted)
         }
-        let value = isSliding ? Int(sliderVolume.rounded()) : coordinator.menuVolume
-        return "\(value)%"
-    }
-}
-
-private struct HDMIButtonLabel: View {
-    let title: String
-    let isSelected: Bool
-
-    var body: some View {
-        HStack(spacing: 7) {
-            if isSelected {
-                Circle()
-                    .fill(Color.accentColor)
-                    .frame(width: 6, height: 6)
-            }
-
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-        }
-        .frame(maxWidth: .infinity, minHeight: 27)
-        .padding(.horizontal, 8)
-        .background {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color.primary.opacity(isSelected ? 0.12 : 0.06))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(isSelected ? Color.accentColor.opacity(0.72) : Color.primary.opacity(0.10), lineWidth: isSelected ? 1.2 : 0.7)
-        }
-    }
-}
-
-private struct FooterActionLabel: View {
-    let title: String
-    var symbol: String? = nil
-    var isSecondary = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if let symbol {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
-        }
-            .foregroundStyle(isSecondary ? .secondary : .primary)
-            .frame(maxWidth: .infinity, minHeight: 28)
-            .background {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color.primary.opacity(0.07))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(Color.primary.opacity(0.10), lineWidth: 0.7)
-            }
-    }
-}
-
-private struct VolumeTrack: View {
-    @Binding var value: Double
-    let disabled: Bool
-    let onEditingChanged: (Bool) -> Void
-
-    var body: some View {
-        GeometryReader { proxy in
-            let width = max(proxy.size.width, 1)
-            let progress = CGFloat(min(max(value / 100, 0), 1))
-            let thumbSize: CGFloat = 13
-            let thumbX = min(max(progress * width, thumbSize / 2), width - thumbSize / 2)
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.primary.opacity(disabled ? 0.13 : 0.16))
-                    .frame(height: 4)
-
-                Capsule()
-                    .fill(Color.primary.opacity(disabled ? 0.18 : 0.78))
-                    .frame(width: max(thumbX, 0), height: 4)
-
-                Circle()
-                    .fill(disabled ? Color.secondary.opacity(0.48) : Color.primary.opacity(0.94))
-                    .frame(width: thumbSize, height: thumbSize)
-                    .shadow(color: .black.opacity(0.22), radius: 3, y: 1)
-                    .offset(x: thumbX - thumbSize / 2)
-            }
-            .frame(height: 18)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { gesture in
-                        guard !disabled else { return }
-                        onEditingChanged(true)
-                        let raw = min(max(gesture.location.x / width, 0), 1)
-                        value = Double(raw * 100).rounded()
-                    }
-                    .onEnded { gesture in
-                        guard !disabled else { return }
-                        let raw = min(max(gesture.location.x / width, 0), 1)
-                        value = Double(raw * 100).rounded()
-                        onEditingChanged(false)
-                    }
-            )
-        }
-        .frame(height: 18)
-        .opacity(disabled ? 0.62 : 1)
-    }
-}
-
-private struct SingleLayerPanelSheen: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        ZStack(alignment: .top) {
-            LinearGradient(
-                colors: colorScheme == .dark
-                    ? [Color.white.opacity(0.055), Color.clear]
-                    : [Color.white.opacity(0.18), Color.clear],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .allowsHitTesting(false)
-        }
+        return "\(coordinator.menuVolume)%"
     }
 }
 

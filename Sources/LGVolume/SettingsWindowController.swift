@@ -51,7 +51,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private weak var coordinator: AppCoordinator?
 
     private var selectedPage: SettingsPage = .general
-    private var pageButtons: [SettingsPage: NSButton] = [:]
+    private let pageControl = NSSegmentedControl(labels: ["", "", "", ""], trackingMode: .selectOne, target: nil, action: nil)
     private let pageTitleLabel = NSTextField(labelWithString: "")
     private let pageSubtitleLabel = NSTextField(labelWithString: "")
     private let contentContainer = NSView()
@@ -99,9 +99,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             loadEditableValues()
         }
         launchAtLoginButton.state = coordinator?.launchAtLogin == true ? .on : .off
+        launchAtLoginButton.toolTip = coordinator?.launchAtLoginRequiresApproval == true ? t(.launchRequiresApproval) : nil
         updateAppearanceSelection()
         updateLanguageSelection()
-        updatePageButtons()
         updateShortcutStatus()
         if renderedLanguageMode != settings.languageMode {
             refreshLocalizedText()
@@ -116,8 +116,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         window?.title = "LGVolume \(t(.settings))"
         pageSubtitleLabel.stringValue = t(selectedPage.subtitleKey)
 
-        for page in SettingsPage.allCases {
-            pageButtons[page]?.title = t(page.tabKey)
+        for (offset, page) in SettingsPage.allCases.enumerated() {
+            pageControl.setLabel(t(page.tabKey), forSegment: offset)
         }
 
         appearanceControl.setLabel(t(.auto), forSegment: 0)
@@ -137,6 +137,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         saveButton.title = t(.save)
         syncVolumeButton.title = t(.syncVolume)
         restoreHDMIShortcutsButton.title = t(.restoreHDMIShortcuts)
+        updatePageSelection()
         for field in hdmiShortcutFields {
             field.recordingPlaceholder = t(.pressShortcut)
             field.emptyPlaceholder = t(.notSet)
@@ -183,28 +184,33 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     }
 
     private func configureControls() {
-        connectionNameLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
-        volumePercentLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
+        connectionNameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        volumePercentLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         ipField.delegate = self
         configureTextField(ipField)
         configureTextField(nameField)
         ipField.widthAnchor.constraint(equalToConstant: 420).isActive = true
-        ipField.heightAnchor.constraint(equalToConstant: 32).isActive = true
         nameField.widthAnchor.constraint(equalToConstant: 420).isActive = true
-        nameField.heightAnchor.constraint(equalToConstant: 32).isActive = true
 
         for field in hdmiNameFields {
             field.placeholderString = "HDMI"
             configureTextField(field)
             field.widthAnchor.constraint(equalToConstant: 420).isActive = true
-            field.heightAnchor.constraint(equalToConstant: 32).isActive = true
         }
 
         for field in hdmiShortcutFields {
             field.alignment = .center
             field.widthAnchor.constraint(equalToConstant: 360).isActive = true
         }
+
+        pageControl.target = self
+        pageControl.action = #selector(changePage(_:))
+        pageControl.segmentStyle = .rounded
+        pageControl.controlSize = .small
+        pageControl.font = .systemFont(ofSize: 12, weight: .medium)
+        pageControl.selectedSegment = 0
+        pageControl.widthAnchor.constraint(equalToConstant: 360).isActive = true
 
         appearanceControl.target = self
         appearanceControl.action = #selector(changeAppearance)
@@ -249,8 +255,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let header = NSStackView()
         header.orientation = .vertical
         header.alignment = .leading
-        header.spacing = 8
-        header.edgeInsets = NSEdgeInsets(top: 20, left: 32, bottom: 12, right: 32)
+        header.spacing = 7
+        header.edgeInsets = NSEdgeInsets(top: 18, left: 32, bottom: 10, right: 32)
         header.setContentHuggingPriority(.required, for: .vertical)
         pageTitleLabel.font = .systemFont(ofSize: 22, weight: .bold)
         header.addArrangedSubview(pageTitleLabel)
@@ -258,20 +264,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         pageSubtitleLabel.font = .systemFont(ofSize: 13)
         header.addArrangedSubview(pageSubtitleLabel)
 
-        let tabs = NSStackView()
-        tabs.orientation = .horizontal
-        tabs.alignment = .centerY
-        tabs.spacing = 10
-        tabs.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 0, right: 0)
-        for page in SettingsPage.allCases {
-            let button = tabButton(page: page)
-            pageButtons[page] = button
-            tabs.addArrangedSubview(button)
-        }
-        header.addArrangedSubview(tabs)
+        header.addArrangedSubview(pageControl)
         root.addArrangedSubview(header)
         header.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        header.heightAnchor.constraint(equalToConstant: 128).isActive = true
+        header.heightAnchor.constraint(equalToConstant: 104).isActive = true
 
         let separator = separatorLine()
         root.addArrangedSubview(separator)
@@ -281,28 +277,16 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         root.addArrangedSubview(contentContainer)
         NSLayoutConstraint.activate([
             contentContainer.widthAnchor.constraint(equalTo: root.widthAnchor),
-            contentContainer.heightAnchor.constraint(equalToConstant: 260)
+            contentContainer.heightAnchor.constraint(equalToConstant: 270)
         ])
 
         refresh()
     }
 
-    private func tabButton(page: SettingsPage) -> NSButton {
-        let button = NSButton(title: t(page.tabKey), target: self, action: #selector(changePage(_:)))
-        button.tag = SettingsPage.allCases.firstIndex(of: page) ?? 0
-        button.isBordered = false
-        button.setButtonType(.toggle)
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 7
-        button.widthAnchor.constraint(equalToConstant: 150).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 34).isActive = true
-        return button
-    }
-
     private func renderCurrentPage() {
         pageTitleLabel.stringValue = t(selectedPage.titleKey)
         pageSubtitleLabel.stringValue = t(selectedPage.subtitleKey)
-        updatePageButtons()
+        updatePageSelection()
 
         contentContainer.subviews.forEach { $0.removeFromSuperview() }
         let pageView: NSView
@@ -327,40 +311,17 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         ])
     }
 
-    private func updatePageButtons() {
-        for (page, button) in pageButtons {
-            let selected = page == selectedPage
-            let isDark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            let idleBackground = isDark
-                ? NSColor.white.withAlphaComponent(0.08)
-                : NSColor.black.withAlphaComponent(0.06)
-            let idleBorder = isDark
-                ? NSColor.white.withAlphaComponent(0.10)
-                : NSColor.black.withAlphaComponent(0.08)
-            button.state = selected ? .on : .off
-            button.layer?.backgroundColor = (selected ? NSColor.controlAccentColor : idleBackground).cgColor
-            button.layer?.borderColor = (selected ? NSColor.clear : idleBorder).cgColor
-            button.layer?.borderWidth = selected ? 0 : 0.5
-            button.contentTintColor = selected ? .white : .labelColor
-        }
+    private func updatePageSelection() {
+        pageControl.selectedSegment = SettingsPage.allCases.firstIndex(of: selectedPage) ?? 0
     }
 
     private func generalPage() -> NSView {
         let stack = pageStack()
 
         let statusRow = row()
-        statusRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 42).isActive = true
-        let titleStack = NSStackView()
-        titleStack.orientation = .vertical
-        titleStack.alignment = .leading
-        titleStack.spacing = 4
-
-        let nameRow = row(spacing: 8)
+        statusRow.alignment = .firstBaseline
         connectionNameLabel.font = .systemFont(ofSize: 22, weight: .bold)
-        nameRow.addArrangedSubview(connectionNameLabel)
-        titleStack.addArrangedSubview(nameRow)
-
-        statusRow.addArrangedSubview(titleStack)
+        statusRow.addArrangedSubview(connectionNameLabel)
         statusRow.addArrangedSubview(spacer())
 
         let volumeStack = row(spacing: 8)
@@ -373,28 +334,19 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         statusRow.addArrangedSubview(volumeStack)
         stack.addArrangedSubview(statusRow)
 
-        stack.addArrangedSubview(separatorLine(width: 620))
+        stack.addArrangedSubview(separatorLine())
 
-        let grid = NSGridView(views: [
-            [fixedLabel("LG TV IP:"), ipField],
-            [fixedLabel(.displayName), nameField]
-        ])
-        grid.rowSpacing = 10
-        grid.columnSpacing = 10
-        grid.row(at: 0).height = 36
-        grid.row(at: 1).height = 36
-        grid.row(at: 0).yPlacement = .center
-        grid.row(at: 1).yPlacement = .center
         ipFeedbackLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        stack.addArrangedSubview(grid)
+        stack.addArrangedSubview(formRow(label: fixedLabel("LG TV IP:"), control: ipField))
+        stack.addArrangedSubview(formRow(label: fixedLabel(.displayName), control: nameField))
 
         let feedbackRow = row()
-        feedbackRow.addArrangedSubview(spacer(width: 130))
+        feedbackRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
         feedbackRow.addArrangedSubview(ipFeedbackLabel)
         stack.addArrangedSubview(feedbackRow)
 
         let actionRow = row()
-        actionRow.addArrangedSubview(spacer(width: 130))
+        actionRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
         actionRow.addArrangedSubview(saveButton)
         actionRow.addArrangedSubview(connectButton)
         actionRow.addArrangedSubview(syncVolumeButton)
@@ -426,17 +378,12 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private func hdmiPage() -> NSView {
         let stack = pageStack()
-        let grid = NSGridView(views: [
-            [fixedLabel("HDMI1:"), hdmiNameFields[0]],
-            [fixedLabel("HDMI2:"), hdmiNameFields[1]],
-            [fixedLabel("HDMI3:"), hdmiNameFields[2]],
-            [fixedLabel("HDMI4:"), hdmiNameFields[3]]
-        ])
-        grid.rowSpacing = 10
-        grid.columnSpacing = 10
-        stack.addArrangedSubview(grid)
+        stack.addArrangedSubview(formRow(label: fixedLabel("HDMI1:"), control: hdmiNameFields[0]))
+        stack.addArrangedSubview(formRow(label: fixedLabel("HDMI2:"), control: hdmiNameFields[1]))
+        stack.addArrangedSubview(formRow(label: fixedLabel("HDMI3:"), control: hdmiNameFields[2]))
+        stack.addArrangedSubview(formRow(label: fixedLabel("HDMI4:"), control: hdmiNameFields[3]))
         let actionRow = row()
-        actionRow.addArrangedSubview(spacer(width: 130))
+        actionRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
         actionRow.addArrangedSubview(saveButton)
         stack.addArrangedSubview(actionRow)
         return pageBox(stack)
@@ -455,20 +402,15 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         summaryRow.addArrangedSubview(shortcutStateLabel)
         stack.addArrangedSubview(summaryRow)
 
-        stack.addArrangedSubview(separatorLine(width: 620))
+        stack.addArrangedSubview(separatorLine())
 
-        let grid = NSGridView(views: [
-            [fixedLabel(.hdmiShortcut1), hdmiShortcutFields[0]],
-            [fixedLabel(.hdmiShortcut2), hdmiShortcutFields[1]],
-            [fixedLabel(.hdmiShortcut3), hdmiShortcutFields[2]],
-            [fixedLabel(.hdmiShortcut4), hdmiShortcutFields[3]]
-        ])
-        grid.rowSpacing = 10
-        grid.columnSpacing = 10
-        stack.addArrangedSubview(grid)
+        stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut1), control: hdmiShortcutFields[0]))
+        stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut2), control: hdmiShortcutFields[1]))
+        stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut3), control: hdmiShortcutFields[2]))
+        stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut4), control: hdmiShortcutFields[3]))
 
         let restoreRow = row()
-        restoreRow.addArrangedSubview(spacer(width: 130))
+        restoreRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
         restoreRow.addArrangedSubview(saveButton)
         restoreRow.addArrangedSubview(restoreHDMIShortcutsButton)
         stack.addArrangedSubview(restoreRow)
@@ -485,13 +427,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         return stack
     }
 
-    private func pageBox(_ stack: NSStackView) -> NSBox {
-        let box = NSBox()
-        box.boxType = .custom
-        box.cornerRadius = 10
-        box.borderColor = NSColor.separatorColor
-        box.fillColor = NSColor.controlBackgroundColor
-        guard let contentView = box.contentView else { return box }
+    private func pageBox(_ stack: NSStackView) -> NSView {
+        let contentView = NSView()
         contentView.addSubview(stack)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -501,7 +438,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             stack.topAnchor.constraint(equalTo: contentView.topAnchor),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor)
         ])
-        return box
+        return contentView
     }
 
     private func row(spacing: CGFloat = 10) -> NSStackView {
@@ -512,30 +449,35 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         return stack
     }
 
+    private func formRow(label: NSTextField, control: NSView) -> NSStackView {
+        let stack = row()
+        stack.alignment = .firstBaseline
+        stack.addArrangedSubview(label)
+        stack.addArrangedSubview(control)
+        return stack
+    }
+
     private func fixedLabel(_ key: L10n.Key) -> NSTextField {
         let field = label(t(key))
         field.alignment = .right
-        field.font = .systemFont(ofSize: 15, weight: .medium)
-        field.widthAnchor.constraint(equalToConstant: 120).isActive = true
-        field.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
+        field.font = Self.formFont
+        field.widthAnchor.constraint(equalToConstant: Self.labelColumnWidth).isActive = true
         return field
     }
 
     private func fixedLabel(_ text: String) -> NSTextField {
         let field = label(text)
         field.alignment = .right
-        field.font = .systemFont(ofSize: 15, weight: .medium)
-        field.widthAnchor.constraint(equalToConstant: 120).isActive = true
-        field.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
+        field.font = Self.formFont
+        field.widthAnchor.constraint(equalToConstant: Self.labelColumnWidth).isActive = true
         return field
     }
 
     private func configureTextField(_ field: NSTextField) {
-        let font = NSFont.systemFont(ofSize: 15)
-        field.font = font
+        field.font = Self.formFont
         field.controlSize = .regular
         field.cell?.controlSize = .regular
-        field.cell?.font = font
+        field.cell?.font = Self.formFont
         field.cell?.usesSingleLineMode = true
         field.cell?.wraps = false
         field.cell?.isScrollable = true
@@ -545,12 +487,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         NSTextField(labelWithString: text)
     }
 
-    private func separatorLine(width: CGFloat? = nil) -> NSBox {
+    private func separatorLine() -> NSBox {
         let box = NSBox()
         box.boxType = .separator
-        if let width {
-            box.widthAnchor.constraint(equalToConstant: width).isActive = true
-        }
+        box.widthAnchor.constraint(equalToConstant: 620).isActive = true
         return box
     }
 
@@ -654,8 +594,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         L10n.text(key, languageMode: settings.languageMode)
     }
 
-    @objc private func changePage(_ sender: NSButton) {
-        selectedPage = SettingsPage.allCases[max(0, min(sender.tag, SettingsPage.allCases.count - 1))]
+    @objc private func changePage(_ sender: NSSegmentedControl) {
+        selectedPage = SettingsPage.allCases[max(0, min(sender.selectedSegment, SettingsPage.allCases.count - 1))]
         renderCurrentPage()
     }
 
@@ -710,7 +650,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         if coordinator?.isConnected == true {
             coordinator?.disconnect()
         } else {
-            coordinator?.pair()
+            coordinator?.connectFromSettings()
         }
     }
 
@@ -718,4 +658,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         guard commitSettings() else { return }
         coordinator?.refreshVolume()
     }
+
+    private static let formFont = NSFont.systemFont(ofSize: 15)
+    private static let labelColumnWidth: CGFloat = 120
 }

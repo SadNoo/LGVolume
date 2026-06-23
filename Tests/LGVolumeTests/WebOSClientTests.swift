@@ -20,6 +20,12 @@ final class WebOSClientTests: XCTestCase {
         XCTAssertEqual(low.volume, 0)
     }
 
+    func testParsesFractionalVolumeByRoundingToNearestInteger() throws {
+        let status = try XCTUnwrap(WebOSClient.parseVolumeStatus(["volume": 42.6]))
+
+        XCTAssertEqual(status.volume, 43)
+    }
+
     func testRejectsVolumeResponseWithoutVolume() {
         XCTAssertNil(WebOSClient.parseVolumeStatus(["muted": false]))
     }

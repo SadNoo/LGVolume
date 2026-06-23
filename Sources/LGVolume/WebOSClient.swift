@@ -5,6 +5,7 @@ struct TVVolumeStatus {
     let muted: Bool
 }
 
+@MainActor
 final class WebOSClient: NSObject {
     private var webSocket: URLSessionWebSocketTask?
     private var session: URLSession?
@@ -285,10 +286,9 @@ final class WebOSClient: NSObject {
     }
 
     private func receiveLoop(for task: URLSessionWebSocketTask) {
-        task.receive { [weak self, weak task] result in
-            guard let self else { return }
-            DispatchQueue.main.async {
-                guard let task, self.webSocket === task else {
+        task.receive { [weak self] result in
+            Task { @MainActor in
+                guard let self, self.webSocket === task else {
                     return
                 }
                 switch result {
@@ -349,11 +349,11 @@ final class WebOSClient: NSObject {
         return .success(())
     }
 
-    static func parseVolumeStatus(_ payload: [String: Any]) -> TVVolumeStatus? {
+    nonisolated static func parseVolumeStatus(_ payload: [String: Any]) -> TVVolumeStatus? {
         let volumeStatus = payload["volumeStatus"] as? [String: Any]
         let source = volumeStatus ?? payload
         let volume = source["volume"] as? Int
-            ?? (source["volume"] as? Double).map(Int.init)
+            ?? (source["volume"] as? Double).map { Int($0.rounded()) }
             ?? Int(source["volume"] as? String ?? "")
         guard let volume else {
             return nil
@@ -468,8 +468,8 @@ final class WebOSClient: NSObject {
 }
 
 extension WebOSClient: URLSessionWebSocketDelegate {
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        DispatchQueue.main.async { [weak self, weak webSocketTask] in
+    nonisolated func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        Task { @MainActor [weak self, weak webSocketTask] in
             guard let self, let webSocketTask, self.webSocket === webSocketTask else {
                 return
             }
@@ -477,7 +477,7 @@ extension WebOSClient: URLSessionWebSocketDelegate {
         }
     }
 
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+    nonisolated func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
            let trust = challenge.protectionSpace.serverTrust {
             completionHandler(.useCredential, URLCredential(trust: trust))

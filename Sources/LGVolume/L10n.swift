@@ -33,6 +33,7 @@ enum L10n {
         case language
         case launch
         case launchAtLogin
+        case launchRequiresApproval
         case light
         case localNetworkOnly
         case matchStatus
@@ -131,6 +132,7 @@ enum L10n {
         .language: "语言：",
         .launch: "启动：",
         .launchAtLogin: "登录时自动启动 LGVolume",
+        .launchRequiresApproval: "请在系统设置中允许 LGVolume 登录时启动。",
         .light: "浅色",
         .localNetworkOnly: "为保护隐私，LGVolume 仅允许连接局域网 IPv4 地址，例如 192.168.x.x、10.x.x.x 或 172.16-31.x.x。",
         .matchStatus: "匹配状态：",
@@ -202,6 +204,7 @@ enum L10n {
         .language: "Language:",
         .launch: "Launch:",
         .launchAtLogin: "Launch LGVolume at login",
+        .launchRequiresApproval: "Allow LGVolume to launch at login in System Settings.",
         .light: "Light",
         .localNetworkOnly: "For privacy, LGVolume only connects to private local-network IPv4 addresses such as 192.168.x.x, 10.x.x.x, or 172.16-31.x.x.",
         .matchStatus: "Pairing:",
@@ -273,6 +276,7 @@ enum L10n {
         .language: "言語：",
         .launch: "起動：",
         .launchAtLogin: "ログイン時に LGVolume を起動",
+        .launchRequiresApproval: "システム設定で LGVolume のログイン時起動を許可してください。",
         .light: "ライト",
         .localNetworkOnly: "プライバシー保護のため、LGVolume は 192.168.x.x、10.x.x.x、172.16-31.x.x などのローカル IPv4 アドレスにのみ接続します。",
         .matchStatus: "ペアリング：",

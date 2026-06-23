@@ -1,7 +1,13 @@
 import AppKit
 import Carbon.HIToolbox
 
-final class KeyboardVolumeMonitor {
+final class KeyboardVolumeMonitor: @unchecked Sendable {
+    private enum VolumeAction {
+        case mute
+        case down
+        case up
+    }
+
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var hotKeyRefs: [EventHotKeyRef?] = []
@@ -9,20 +15,22 @@ final class KeyboardVolumeMonitor {
     private var eventHandlerRef: EventHandlerRef?
     private var activeHDMIShortcuts: [KeyboardShortcut?] = []
     private var lastHDMITriggerTime = Date.distantPast
-    private let onVolumeDown: () -> Void
-    private let onVolumeUp: () -> Void
-    private let onMute: () -> Void
+    private var lastVolumeTrigger: (action: VolumeAction, time: Date)?
+    private var isStarted = false
+    private let onVolumeDown: @MainActor () -> Void
+    private let onVolumeUp: @MainActor () -> Void
+    private let onMute: @MainActor () -> Void
     private let hdmiShortcuts: () -> [KeyboardShortcut?]
-    private let onHDMIShortcut: (Int) -> Void
-    private let onShortcutRegistrationChanged: ([Bool]) -> Void
+    private let onHDMIShortcut: @MainActor (Int) -> Void
+    private let onShortcutRegistrationChanged: @MainActor ([Bool]) -> Void
 
     init(
-        onVolumeDown: @escaping () -> Void,
-        onVolumeUp: @escaping () -> Void,
-        onMute: @escaping () -> Void,
+        onVolumeDown: @escaping @MainActor () -> Void,
+        onVolumeUp: @escaping @MainActor () -> Void,
+        onMute: @escaping @MainActor () -> Void,
         hdmiShortcuts: @escaping () -> [KeyboardShortcut?],
-        onHDMIShortcut: @escaping (Int) -> Void,
-        onShortcutRegistrationChanged: @escaping ([Bool]) -> Void
+        onHDMIShortcut: @escaping @MainActor (Int) -> Void,
+        onShortcutRegistrationChanged: @escaping @MainActor ([Bool]) -> Void
     ) {
         self.onVolumeDown = onVolumeDown
         self.onVolumeUp = onVolumeUp
@@ -33,23 +41,14 @@ final class KeyboardVolumeMonitor {
     }
 
     func start() {
-        guard globalMonitor == nil, localMonitor == nil else {
+        guard !isStarted else {
             return
         }
+        isStarted = true
         installHotKeyHandler()
         registerVolumeHotKeys()
         updateHDMIShortcuts(hdmiShortcuts())
-
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .systemDefined]) { [weak self] event in
-            if self?.handle(event) == true {
-                return nil
-            }
-            return event
-        }
-
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .systemDefined]) { [weak self] event in
-            _ = self?.handle(event)
-        }
+        installVolumeEventMonitors()
     }
 
     func updateHDMIShortcuts(_ shortcuts: [KeyboardShortcut?]) {
@@ -59,7 +58,6 @@ final class KeyboardVolumeMonitor {
         }
 
         unregisterHDMIHotKeys()
-        unregisterVolumeHotKeys()
         hotKeyRefs = Array(repeating: nil, count: activeHDMIShortcuts.count)
 
         for (offset, shortcut) in activeHDMIShortcuts.enumerated() {
@@ -85,11 +83,14 @@ final class KeyboardVolumeMonitor {
         let states = activeHDMIShortcuts.enumerated().map { offset, shortcut in
             shortcut == nil || hotKeyRefs[offset] != nil
         }
-        onShortcutRegistrationChanged(states)
+        Task { @MainActor in
+            onShortcutRegistrationChanged(states)
+        }
     }
 
     deinit {
         unregisterHDMIHotKeys()
+        unregisterVolumeHotKeys()
         if let eventHandlerRef {
             RemoveEventHandler(eventHandlerRef)
         }
@@ -98,75 +99,6 @@ final class KeyboardVolumeMonitor {
         }
         if let localMonitor {
             NSEvent.removeMonitor(localMonitor)
-        }
-    }
-
-    private func handle(_ event: NSEvent) -> Bool {
-        if event.type == .systemDefined {
-            return handleMediaKey(event)
-        }
-
-        for (offset, shortcut) in activeHDMIShortcuts.enumerated() {
-            if hotKeyRefs.indices.contains(offset), hotKeyRefs[offset] != nil {
-                continue
-            }
-            guard let shortcut, shortcut.matches(event) else {
-                continue
-            }
-            if event.isARepeat {
-                return true
-            }
-            onHDMIShortcut(offset + 1)
-            return true
-        }
-
-        let commandModifiers = event.modifierFlags.intersection([.command, .option, .control])
-        guard commandModifiers.isEmpty else {
-            return false
-        }
-
-        switch event.keyCode {
-        case 109:
-            if event.isARepeat {
-                return true
-            }
-            onMute()
-            return true
-        case 103:
-            onVolumeDown()
-            return true
-        case 111:
-            onVolumeUp()
-            return true
-        default:
-            return false
-        }
-    }
-
-    private func handleMediaKey(_ event: NSEvent) -> Bool {
-        guard event.subtype.rawValue == 8 else {
-            return false
-        }
-
-        let keyCode = Int((event.data1 & 0xFFFF0000) >> 16)
-        let keyFlags = Int(event.data1 & 0x0000FFFF)
-        let keyState = (keyFlags & 0xFF00) >> 8
-        guard keyState == 0x0A else {
-            return false
-        }
-
-        switch keyCode {
-        case 7:
-            onMute()
-            return true
-        case 1:
-            onVolumeDown()
-            return true
-        case 0:
-            onVolumeUp()
-            return true
-        default:
-            return false
         }
     }
 
@@ -199,7 +131,9 @@ final class KeyboardVolumeMonitor {
                 }
 
                 let monitor = Unmanaged<KeyboardVolumeMonitor>.fromOpaque(userData).takeUnretainedValue()
-                monitor.handleRegisteredHotKey(id: hotKeyID.id)
+                Task { @MainActor in
+                    monitor.handleRegisteredHotKey(id: hotKeyID.id)
+                }
                 return noErr
             },
             1,
@@ -209,16 +143,17 @@ final class KeyboardVolumeMonitor {
         )
     }
 
+    @MainActor
     private func handleRegisteredHotKey(id: UInt32) {
         switch id {
         case 10:
-            DispatchQueue.main.async { self.onMute() }
+            triggerVolumeAction(.mute)
             return
         case 11:
-            DispatchQueue.main.async { self.onVolumeDown() }
+            triggerVolumeAction(.down)
             return
         case 12:
-            DispatchQueue.main.async { self.onVolumeUp() }
+            triggerVolumeAction(.up)
             return
         default:
             break
@@ -229,8 +164,98 @@ final class KeyboardVolumeMonitor {
             return
         }
         lastHDMITriggerTime = now
-        DispatchQueue.main.async {
-            self.onHDMIShortcut(Int(id))
+        onHDMIShortcut(Int(id))
+    }
+
+    private func installVolumeEventMonitors() {
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .systemDefined]) { [weak self] event in
+            if self?.handleVolumeEvent(event) == true {
+                return nil
+            }
+            return event
+        }
+
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .systemDefined]) { [weak self] event in
+            _ = self?.handleVolumeEvent(event)
+        }
+    }
+
+    private func handleVolumeEvent(_ event: NSEvent) -> Bool {
+        if event.type == .systemDefined {
+            return handleMediaKey(event)
+        }
+
+        guard event.type == .keyDown else {
+            return false
+        }
+
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard modifiers.isEmpty else {
+            return false
+        }
+
+        switch event.keyCode {
+        case Self.f10KeyCode:
+            if event.isARepeat {
+                return true
+            }
+            Task { @MainActor in self.triggerVolumeAction(.mute) }
+            return true
+        case Self.f11KeyCode:
+            Task { @MainActor in self.triggerVolumeAction(.down) }
+            return true
+        case Self.f12KeyCode:
+            Task { @MainActor in self.triggerVolumeAction(.up) }
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func handleMediaKey(_ event: NSEvent) -> Bool {
+        guard event.subtype.rawValue == 8 else {
+            return false
+        }
+
+        let keyCode = Int((event.data1 & 0xFFFF0000) >> 16)
+        let keyFlags = Int(event.data1 & 0x0000FFFF)
+        let keyState = (keyFlags & 0xFF00) >> 8
+        guard keyState == 0x0A else {
+            return false
+        }
+
+        switch keyCode {
+        case Self.mediaMuteKeyCode:
+            Task { @MainActor in self.triggerVolumeAction(.mute) }
+            return true
+        case Self.mediaVolumeDownKeyCode:
+            Task { @MainActor in self.triggerVolumeAction(.down) }
+            return true
+        case Self.mediaVolumeUpKeyCode:
+            Task { @MainActor in self.triggerVolumeAction(.up) }
+            return true
+        default:
+            return false
+        }
+    }
+
+    @MainActor
+    private func triggerVolumeAction(_ action: VolumeAction) {
+        let now = Date()
+        if let lastVolumeTrigger,
+           lastVolumeTrigger.action == action,
+           now.timeIntervalSince(lastVolumeTrigger.time) < 0.05 {
+            return
+        }
+        lastVolumeTrigger = (action, now)
+
+        switch action {
+        case .mute:
+            onMute()
+        case .down:
+            onVolumeDown()
+        case .up:
+            onVolumeUp()
         }
     }
 
@@ -245,7 +270,7 @@ final class KeyboardVolumeMonitor {
 
     private func registerVolumeHotKeys() {
         unregisterVolumeHotKeys()
-        for (id, keyCode) in [(10, 109), (11, 103), (12, 111)] {
+        for (id, keyCode) in [(10, Self.f10KeyCode), (11, Self.f11KeyCode), (12, Self.f12KeyCode)] {
             var hotKeyRef: EventHotKeyRef?
             let hotKeyID = EventHotKeyID(signature: Self.hotKeySignature, id: UInt32(id))
             if RegisterEventHotKey(
@@ -272,4 +297,10 @@ final class KeyboardVolumeMonitor {
         let scalars = Array("LGVH".unicodeScalars)
         return scalars.reduce(0) { ($0 << 8) + OSType($1.value) }
     }()
+    private static let f10KeyCode: UInt16 = 109
+    private static let f11KeyCode: UInt16 = 103
+    private static let f12KeyCode: UInt16 = 111
+    private static let mediaVolumeUpKeyCode = 0
+    private static let mediaVolumeDownKeyCode = 1
+    private static let mediaMuteKeyCode = 7
 }

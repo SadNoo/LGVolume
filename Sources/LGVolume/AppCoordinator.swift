@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import ServiceManagement
 
+@MainActor
 final class AppCoordinator: ObservableObject {
     private struct PendingConnectionAction {
         let run: () -> Void
@@ -20,14 +21,12 @@ final class AppCoordinator: ObservableObject {
     private var settingsWindowController: SettingsWindowController?
     private var discoveredDevices: [DiscoveredTV] = []
     private lazy var keyboardVolumeMonitor = KeyboardVolumeMonitor(
-        onVolumeDown: { [weak self] in DispatchQueue.main.async { self?.adjustVolumeByKeyboard(delta: -1) } },
-        onVolumeUp: { [weak self] in DispatchQueue.main.async { self?.adjustVolumeByKeyboard(delta: 1) } },
-        onMute: { [weak self] in DispatchQueue.main.async { self?.toggleMuteFromPanel() } },
+        onVolumeDown: { [weak self] in self?.adjustVolumeByKeyboard(delta: -Self.keyboardVolumeStep) },
+        onVolumeUp: { [weak self] in self?.adjustVolumeByKeyboard(delta: Self.keyboardVolumeStep) },
+        onMute: { [weak self] in self?.toggleMuteFromPanel() },
         hdmiShortcuts: { [weak self] in self?.settings.hdmiShortcuts ?? [] },
-        onHDMIShortcut: { [weak self] index in DispatchQueue.main.async { self?.switchHDMIFromPanel(index: index) } },
-        onShortcutRegistrationChanged: { [weak self] states in
-            DispatchQueue.main.async { self?.shortcutRegistrationStates = states }
-        }
+        onHDMIShortcut: { [weak self] index in self?.switchHDMIFromPanel(index: index) },
+        onShortcutRegistrationChanged: { [weak self] states in self?.shortcutRegistrationStates = states }
     )
     @Published private(set) var isConnecting = false
     private var pendingConnectionActions: [PendingConnectionAction] = []
@@ -59,7 +58,10 @@ final class AppCoordinator: ObservableObject {
     var currentVolume: Int { menuVolume }
     var launchAtLogin: Bool {
         let serviceStatus = SMAppService.mainApp.status
-        return serviceStatus == .enabled || serviceStatus == .requiresApproval
+        return serviceStatus == .enabled
+    }
+    var launchAtLoginRequiresApproval: Bool {
+        SMAppService.mainApp.status == .requiresApproval
     }
     var hdmiShortcuts: [KeyboardShortcut?] { settings.hdmiShortcuts }
 
@@ -153,6 +155,10 @@ final class AppCoordinator: ObservableObject {
         connect(showPairingPrompt: true)
     }
 
+    func connectFromSettings() {
+        connect(showPairingPrompt: settings.clientKey.isEmpty)
+    }
+
     func disconnect() {
         failPendingConnectionActions()
         resetActiveCommands()
@@ -184,7 +190,7 @@ final class AppCoordinator: ObservableObject {
                 if SMAppService.mainApp.status == .notRegistered {
                     try SMAppService.mainApp.register()
                 }
-                status = text(.saveSuccess)
+                status = launchAtLoginRequiresApproval ? text(.launchRequiresApproval) : text(.saveSuccess)
             } else {
                 if SMAppService.mainApp.status != .notRegistered {
                     try SMAppService.mainApp.unregister()
@@ -489,4 +495,6 @@ final class AppCoordinator: ObservableObject {
         settingsWindowController = controller
         return controller
     }
+
+    private static let keyboardVolumeStep = 5
 }

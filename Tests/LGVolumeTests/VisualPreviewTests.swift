@@ -18,8 +18,6 @@ final class VisualPreviewTests: XCTestCase {
         let settingsWindow = try XCTUnwrap(settingsController.window)
         settingsWindow.layoutIfNeeded()
         let settingsView = try XCTUnwrap(settingsWindow.contentView)
-        settingsView.wantsLayer = true
-        settingsView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         let settingsSize = NSSize(width: 720, height: 390)
         try render(settingsView, size: settingsSize, to: outputDirectory.appendingPathComponent("settings-general.png"))
         settingsWindow.appearance = NSAppearance(named: .darkAqua)
@@ -27,12 +25,14 @@ final class VisualPreviewTests: XCTestCase {
         try render(settingsView, size: settingsSize, to: outputDirectory.appendingPathComponent("settings-general-dark.png"))
         settingsWindow.appearance = NSAppearance(named: .aqua)
         settingsController.refresh()
-        for (title, filename) in [
-            (L10n.text(.misc, languageMode: settings.languageMode), "settings-preferences.png"),
-            (L10n.text(.hdmi, languageMode: settings.languageMode), "settings-hdmi.png"),
-            (L10n.text(.shortcuts, languageMode: settings.languageMode), "settings-shortcuts.png")
+        let pageControl = try XCTUnwrap(findSegmentedControl(in: settingsView))
+        for (segment, filename) in [
+            (1, "settings-preferences.png"),
+            (2, "settings-hdmi.png"),
+            (3, "settings-shortcuts.png")
         ] {
-            try XCTUnwrap(findButton(in: settingsView, title: title)).performClick(nil)
+            pageControl.selectedSegment = segment
+            _ = pageControl.target?.perform(pageControl.action, with: pageControl)
             settingsWindow.layoutIfNeeded()
             try render(settingsView, size: settingsSize, to: outputDirectory.appendingPathComponent(filename))
         }
@@ -58,6 +58,12 @@ final class VisualPreviewTests: XCTestCase {
 
     private func render(_ view: NSView, size: NSSize, to url: URL) throws {
         view.frame = NSRect(origin: .zero, size: size)
+        view.wantsLayer = true
+        var backgroundColor = NSColor.windowBackgroundColor.cgColor
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
+        view.layer?.backgroundColor = backgroundColor
         view.layoutSubtreeIfNeeded()
         let representation = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: representation)
@@ -66,13 +72,13 @@ final class VisualPreviewTests: XCTestCase {
         XCTAssertGreaterThan(png.count, 1_000)
     }
 
-    private func findButton(in view: NSView, title: String) -> NSButton? {
-        if let button = view as? NSButton, button.title == title {
-            return button
+    private func findSegmentedControl(in view: NSView) -> NSSegmentedControl? {
+        if let control = view as? NSSegmentedControl, control.segmentCount == 4 {
+            return control
         }
         for subview in view.subviews {
-            if let button = findButton(in: subview, title: title) {
-                return button
+            if let control = findSegmentedControl(in: subview) {
+                return control
             }
         }
         return nil
