@@ -56,6 +56,7 @@ enum L10n {
         case saveSuccess
         case scanNetwork
         case settings
+        case secureConnectionOnly
         case shortcuts
         case shortcutsEnabled
         case shortcutsUnavailable
@@ -155,6 +156,7 @@ enum L10n {
         .saveSuccess: "保存成功",
         .scanNetwork: "正在扫描 LG webOS 电视...",
         .settings: "设置",
+        .secureConnectionOnly: "仅使用安全连接（WSS）",
         .shortcuts: "快捷键",
         .shortcutsEnabled: "已启用",
         .shortcutsUnavailable: "部分快捷键不可用",
@@ -227,6 +229,7 @@ enum L10n {
         .saveSuccess: "Saved",
         .scanNetwork: "Scanning for LG webOS TV...",
         .settings: "Settings",
+        .secureConnectionOnly: "Use secure connection only (WSS)",
         .shortcuts: "Shortcuts",
         .shortcutsEnabled: "Enabled",
         .shortcutsUnavailable: "Some shortcuts are unavailable",
@@ -299,6 +302,7 @@ enum L10n {
         .saveSuccess: "保存しました",
         .scanNetwork: "LG webOS TV をスキャン中...",
         .settings: "設定",
+        .secureConnectionOnly: "安全な接続のみ使用（WSS）",
         .shortcuts: "ショートカット",
         .shortcutsEnabled: "有効",
         .shortcutsUnavailable: "一部のショートカットは使用できません",

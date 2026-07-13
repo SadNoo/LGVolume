@@ -62,11 +62,10 @@ struct MenuBarControlView: View {
                 Button {
                     coordinator.switchHDMIFromPanel(index: index + 1)
                 } label: {
-                    Label(
-                        coordinator.menuHDMINames[safe: index] ?? "HDMI\(index + 1)",
+                    alignedActionLabel(
+                        title: coordinator.menuHDMINames[safe: index] ?? "HDMI\(index + 1)",
                         systemImage: selected ? "checkmark.circle.fill" : "circle"
                     )
-                    .frame(maxWidth: .infinity, minHeight: 26)
                 }
                 .buttonStyle(.bordered)
                 .tint(selected ? .accentColor : nil)
@@ -77,11 +76,10 @@ struct MenuBarControlView: View {
                 Button {
                     coordinator.reconnect()
                 } label: {
-                    Label(
-                        coordinator.isConnecting ? coordinator.text(.startPairing) : coordinator.text(.pairConnect),
+                    alignedActionLabel(
+                        title: coordinator.isConnecting ? coordinator.text(.startPairing) : coordinator.text(.pairConnect),
                         systemImage: coordinator.isConnecting ? "arrow.triangle.2.circlepath" : "link"
                     )
-                    .frame(maxWidth: .infinity, minHeight: 26)
                 }
                 .buttonStyle(.bordered)
                 .disabled(coordinator.isConnecting)
@@ -92,8 +90,7 @@ struct MenuBarControlView: View {
             Button {
                 coordinator.showSettings()
             } label: {
-                Label(coordinator.text(.settings), systemImage: "gearshape")
-                    .frame(maxWidth: .infinity, minHeight: 26)
+                alignedActionLabel(title: coordinator.text(.settings), systemImage: "gearshape")
             }
             .buttonStyle(.bordered)
             .keyboardShortcut(",", modifiers: .command)
@@ -101,12 +98,27 @@ struct MenuBarControlView: View {
             Button {
                 coordinator.quit()
             } label: {
-                Label(coordinator.text(.quit), systemImage: "power")
-                    .frame(maxWidth: .infinity, minHeight: 26)
+                alignedActionLabel(title: coordinator.text(.quit), systemImage: "power")
             }
             .buttonStyle(.bordered)
             .keyboardShortcut("q", modifiers: .command)
         }
+    }
+
+    private func alignedActionLabel(title: String, systemImage: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 20, alignment: .center)
+
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
     }
 
     private var headerTitle: String {

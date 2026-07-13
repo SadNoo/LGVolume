@@ -2,9 +2,15 @@ import Foundation
 
 final class AppSettings {
     private let defaults: UserDefaults
+    private let clientKeyStorage: ClientKeyStorage
 
-    init(defaults: UserDefaults = UserDefaults(suiteName: "local.codex.lgvolume") ?? .standard) {
+    init(
+        defaults: UserDefaults = UserDefaults(suiteName: "local.codex.lgvolume") ?? .standard,
+        clientKeyStorage: ClientKeyStorage = KeychainClientKeyStorage()
+    ) {
         self.defaults = defaults
+        self.clientKeyStorage = clientKeyStorage
+        migrateLegacyClientKeyIfNeeded()
     }
 
     private enum Key {
@@ -18,6 +24,7 @@ final class AppSettings {
         static let appearanceMode = "appearanceMode"
         static let launchAtLogin = "launchAtLogin"
         static let languageMode = "languageMode"
+        static let secureConnectionOnly = "secureConnectionOnly"
     }
 
     var tvIP: String {
@@ -34,8 +41,8 @@ final class AppSettings {
     }
 
     var clientKey: String {
-        get { defaults.string(forKey: Key.clientKey) ?? "" }
-        set { defaults.set(newValue, forKey: Key.clientKey) }
+        get { clientKeyStorage.read() }
+        set { clientKeyStorage.save(newValue) }
     }
 
     var volume: Int {
@@ -97,6 +104,7 @@ final class AppSettings {
     }
 
     func clearClientKey() {
+        clientKeyStorage.clear()
         defaults.removeObject(forKey: Key.clientKey)
     }
 
@@ -122,6 +130,20 @@ final class AppSettings {
         }
         set {
             defaults.set(newValue, forKey: Key.languageMode)
+        }
+    }
+
+    var secureConnectionOnly: Bool {
+        get { defaults.bool(forKey: Key.secureConnectionOnly) }
+        set { defaults.set(newValue, forKey: Key.secureConnectionOnly) }
+    }
+
+    private func migrateLegacyClientKeyIfNeeded() {
+        guard let legacyKey = defaults.string(forKey: Key.clientKey), !legacyKey.isEmpty else {
+            return
+        }
+        if !clientKeyStorage.read().isEmpty || clientKeyStorage.save(legacyKey) {
+            defaults.removeObject(forKey: Key.clientKey)
         }
     }
 }

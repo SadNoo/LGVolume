@@ -9,8 +9,9 @@ final class WebOSIntegrationTests: XCTestCase {
         }
 
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "local.codex.lgvolume"))
-        let ip = defaults.string(forKey: "tvIP") ?? ""
-        let clientKey = defaults.string(forKey: "clientKey") ?? ""
+        let settings = AppSettings(defaults: defaults)
+        let ip = settings.tvIP
+        let clientKey = settings.clientKey
         try XCTSkipIf(ip.isEmpty, "No saved LG TV IP.")
         try XCTSkipIf(clientKey.isEmpty, "No saved LG TV client key.")
 

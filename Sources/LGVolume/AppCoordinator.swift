@@ -115,18 +115,31 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    func saveSettings(ip: String, name: String, hdmiNames: [String], hdmiShortcuts: [KeyboardShortcut?]) {
+    func saveSettings(
+        ip: String,
+        name: String,
+        hdmiNames: [String],
+        hdmiShortcuts: [KeyboardShortcut?],
+        secureConnectionOnly: Bool
+    ) {
         let normalizedIP = ip.trimmingCharacters(in: .whitespacesAndNewlines)
         let ipChanged = settings.tvIP != normalizedIP
+        let secureConnectionChanged = settings.secureConnectionOnly != secureConnectionOnly
         if ipChanged {
             resetActiveCommands()
             isConnecting = false
             webOSClient.disconnect()
             settings.clearClientKey()
             selectedHDMIIndex = nil
+        } else if secureConnectionChanged, webOSClient.isConnected || isConnecting {
+            resetActiveCommands()
+            isConnecting = false
+            webOSClient.disconnect()
+            selectedHDMIIndex = nil
         }
         settings.tvIP = normalizedIP
         settings.tvName = name.isEmpty ? "LG TV" : name
+        settings.secureConnectionOnly = secureConnectionOnly
         for (offset, name) in hdmiNames.enumerated() {
             settings.setHDMIName(name, index: offset + 1)
         }
@@ -290,7 +303,12 @@ final class AppCoordinator: ObservableObject {
 
         isConnecting = true
         status = showPairingPrompt ? text(.connectPrompt) : "\(text(.startPairing)) \(settings.tvIP)..."
-        webOSClient.connect(ip: settings.tvIP, clientKey: settings.clientKey, forcePairing: showPairingPrompt) { [weak self] result in
+        webOSClient.connect(
+            ip: settings.tvIP,
+            clientKey: settings.clientKey,
+            forcePairing: showPairingPrompt,
+            secureConnectionOnly: settings.secureConnectionOnly
+        ) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isConnecting = false

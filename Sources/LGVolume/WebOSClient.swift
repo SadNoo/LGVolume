@@ -29,7 +29,13 @@ final class WebOSClient: NSObject {
         self.connectionStateChanged = connectionStateChanged
     }
 
-    func connect(ip: String, clientKey: String, forcePairing: Bool, completion: @escaping (LGResult<String>) -> Void) {
+    func connect(
+        ip: String,
+        clientKey: String,
+        forcePairing: Bool,
+        secureConnectionOnly: Bool = false,
+        completion: @escaping (LGResult<String>) -> Void
+    ) {
         disconnect()
 
         guard LocalNetworkAddress.isAllowedIPv4(ip) else {
@@ -37,10 +43,10 @@ final class WebOSClient: NSObject {
             return
         }
 
-        let urls = [
-            URL(string: "wss://\(ip):3001"),
-            URL(string: "ws://\(ip):3000")
-        ].compactMap { $0 }
+        var urls = [URL(string: "wss://\(ip):3001")].compactMap { $0 }
+        if !secureConnectionOnly, let fallbackURL = URL(string: "ws://\(ip):3000") {
+            urls.append(fallbackURL)
+        }
 
         guard !urls.isEmpty else {
             completion(.failure("\(t(.invalidIPAddress)): \(ip)"))

@@ -63,6 +63,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let appearanceControl = NSSegmentedControl(labels: ["自动", "浅色", "深色"], trackingMode: .selectOne, target: nil, action: nil)
     private let languageControl = NSSegmentedControl(labels: ["自动", "中文", "English", "日本語"], trackingMode: .selectOne, target: nil, action: nil)
     private let launchAtLoginButton = NSButton(checkboxWithTitle: "登录时自动启动 LGVolume", target: nil, action: nil)
+    private let secureConnectionButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let ipField = NSTextField()
     private let nameField = NSTextField()
     private let hdmiNameFields = (0..<4).map { _ in NSTextField() }
@@ -100,6 +101,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         }
         launchAtLoginButton.state = coordinator?.launchAtLogin == true ? .on : .off
         launchAtLoginButton.toolTip = coordinator?.launchAtLoginRequiresApproval == true ? t(.launchRequiresApproval) : nil
+        secureConnectionButton.state = settings.secureConnectionOnly ? .on : .off
         updateAppearanceSelection()
         updateLanguageSelection()
         updateShortcutStatus()
@@ -130,6 +132,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         languageControl.setLabel(t(.japanese), forSegment: 3)
 
         launchAtLoginButton.title = t(.launchAtLogin)
+        secureConnectionButton.title = t(.secureConnectionOnly)
         ipField.placeholderString = t(.inputIP)
         volumeTitleLabel.stringValue = "\(t(.volume))："
         shortcutStateLabel.stringValue = t(.shortcutsEnabled)
@@ -218,6 +221,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         languageControl.action = #selector(changeLanguage)
         launchAtLoginButton.target = self
         launchAtLoginButton.action = #selector(changeLaunchAtLogin)
+        secureConnectionButton.target = self
+        secureConnectionButton.action = #selector(save)
 
         connectButton.target = self
         connectButton.action = #selector(connectOrDisconnect)
@@ -267,7 +272,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         header.addArrangedSubview(pageControl)
         root.addArrangedSubview(header)
         header.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        header.heightAnchor.constraint(equalToConstant: 104).isActive = true
+        header.heightAnchor.constraint(equalToConstant: 96).isActive = true
 
         let separator = separatorLine()
         root.addArrangedSubview(separator)
@@ -276,9 +281,20 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         root.addArrangedSubview(contentContainer)
         NSLayoutConstraint.activate([
-            contentContainer.widthAnchor.constraint(equalTo: root.widthAnchor),
-            contentContainer.heightAnchor.constraint(equalToConstant: 270)
+            contentContainer.widthAnchor.constraint(equalTo: root.widthAnchor)
         ])
+
+        let footerSeparator = separatorLine()
+        root.addArrangedSubview(footerSeparator)
+        footerSeparator.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+
+        let footer = row()
+        footer.edgeInsets = NSEdgeInsets(top: 10, left: 32, bottom: 12, right: 32)
+        footer.addArrangedSubview(spacer())
+        footer.addArrangedSubview(saveButton)
+        root.addArrangedSubview(footer)
+        footer.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        footer.heightAnchor.constraint(equalToConstant: 54).isActive = true
 
         refresh()
     }
@@ -334,7 +350,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         statusRow.addArrangedSubview(volumeStack)
         stack.addArrangedSubview(statusRow)
 
-        stack.addArrangedSubview(separatorLine())
+        stack.addArrangedSubview(pageSeparatorLine())
 
         ipFeedbackLabel.font = .systemFont(ofSize: 12, weight: .medium)
         stack.addArrangedSubview(formRow(label: fixedLabel("LG TV IP:"), control: ipField))
@@ -347,7 +363,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         let actionRow = row()
         actionRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
-        actionRow.addArrangedSubview(saveButton)
         actionRow.addArrangedSubview(connectButton)
         actionRow.addArrangedSubview(syncVolumeButton)
         stack.addArrangedSubview(actionRow)
@@ -373,6 +388,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         loginRow.addArrangedSubview(launchAtLoginButton)
         stack.addArrangedSubview(loginRow)
 
+        let secureRow = row()
+        secureRow.addArrangedSubview(fixedLabel(.connection))
+        secureRow.addArrangedSubview(secureConnectionButton)
+        stack.addArrangedSubview(secureRow)
+
         return pageBox(stack)
     }
 
@@ -382,10 +402,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         stack.addArrangedSubview(formRow(label: fixedLabel("HDMI2:"), control: hdmiNameFields[1]))
         stack.addArrangedSubview(formRow(label: fixedLabel("HDMI3:"), control: hdmiNameFields[2]))
         stack.addArrangedSubview(formRow(label: fixedLabel("HDMI4:"), control: hdmiNameFields[3]))
-        let actionRow = row()
-        actionRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
-        actionRow.addArrangedSubview(saveButton)
-        stack.addArrangedSubview(actionRow)
         return pageBox(stack)
     }
 
@@ -402,7 +418,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         summaryRow.addArrangedSubview(shortcutStateLabel)
         stack.addArrangedSubview(summaryRow)
 
-        stack.addArrangedSubview(separatorLine())
+        stack.addArrangedSubview(pageSeparatorLine())
 
         stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut1), control: hdmiShortcutFields[0]))
         stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut2), control: hdmiShortcutFields[1]))
@@ -411,7 +427,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         let restoreRow = row()
         restoreRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
-        restoreRow.addArrangedSubview(saveButton)
         restoreRow.addArrangedSubview(restoreHDMIShortcutsButton)
         stack.addArrangedSubview(restoreRow)
 
@@ -490,6 +505,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private func separatorLine() -> NSBox {
         let box = NSBox()
         box.boxType = .separator
+        return box
+    }
+
+    private func pageSeparatorLine() -> NSBox {
+        let box = separatorLine()
         box.widthAnchor.constraint(equalToConstant: 620).isActive = true
         return box
     }
@@ -498,6 +518,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let view = NSView()
         if let width {
             view.widthAnchor.constraint(equalToConstant: width).isActive = true
+            view.setContentHuggingPriority(.required, for: .horizontal)
+            view.setContentCompressionResistancePriority(.required, for: .horizontal)
         } else {
             view.setContentHuggingPriority(.defaultLow, for: .horizontal)
         }
@@ -630,7 +652,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             ip: ip,
             name: nameField.stringValue,
             hdmiNames: hdmiNameFields.map(\.stringValue),
-            hdmiShortcuts: hdmiShortcutFields.map(\.shortcut)
+            hdmiShortcuts: hdmiShortcutFields.map(\.shortcut),
+            secureConnectionOnly: secureConnectionButton.state == .on
         )
         loadEditableValues()
         updateIPFeedback(text: t(.saveSuccess))
@@ -646,10 +669,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     }
 
     @objc private func connectOrDisconnect() {
-        guard commitSettings() else { return }
         if coordinator?.isConnected == true {
             coordinator?.disconnect()
         } else {
+            guard commitSettings() else { return }
             coordinator?.connectFromSettings()
         }
     }
