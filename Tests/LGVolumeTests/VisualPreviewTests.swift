@@ -30,6 +30,13 @@ final class VisualPreviewTests: XCTestCase {
         assertVisibleControl("settings.ip", in: settingsView)
         assertVisibleControl("settings.name", in: settingsView)
         assertVisibleControl("settings.save", in: settingsView)
+        assertFormGrid(in: settingsView)
+        assertLeadingEdges([
+            "settings.ip",
+            "settings.name",
+            "settings.ipFeedback",
+            "settings.generalActions"
+        ], in: settingsView)
         try render(settingsView, size: settingsSize, to: outputDirectory.appendingPathComponent("settings-general.png"))
         settingsWindow.appearance = NSAppearance(named: .darkAqua)
         settingsController.refresh()
@@ -45,14 +52,41 @@ final class VisualPreviewTests: XCTestCase {
             pageControl.selectedSegment = segment
             _ = pageControl.target?.perform(pageControl.action, with: pageControl)
             settingsWindow.layoutIfNeeded()
-            if segment == 2 {
+            assertFormGrid(in: settingsView)
+            if segment == 1 {
+                assertLeadingEdges([
+                    "settings.appearance",
+                    "settings.language",
+                    "settings.launchAtLogin",
+                    "settings.secureConnection",
+                    "settings.diagnostics"
+                ], in: settingsView)
+            } else if segment == 2 {
                 assertVisibleControl("settings.useTVInputNames", in: settingsView)
                 assertVisibleControl("settings.detectedInputNames", in: settingsView)
                 for index in 1...4 {
                     assertVisibleControl("settings.hdmiName\(index)", in: settingsView)
                 }
+                assertLeadingEdges([
+                    "settings.useTVInputNames",
+                    "settings.detectedInputNames",
+                    "settings.hdmiName1",
+                    "settings.hdmiName2",
+                    "settings.hdmiName3",
+                    "settings.hdmiName4"
+                ], in: settingsView)
+            } else if segment == 3 {
+                assertLeadingEdges((1...4).map { "settings.hdmiShortcut\($0)" } + [
+                    "settings.restoreHDMIShortcuts"
+                ], in: settingsView)
             }
             try render(settingsView, size: settingsSize, to: outputDirectory.appendingPathComponent(filename))
+            settingsWindow.appearance = NSAppearance(named: .darkAqua)
+            settingsWindow.layoutIfNeeded()
+            let darkFilename = filename.replacingOccurrences(of: ".png", with: "-dark.png")
+            try render(settingsView, size: settingsSize, to: outputDirectory.appendingPathComponent(darkFilename))
+            settingsWindow.appearance = NSAppearance(named: .aqua)
+            settingsWindow.layoutIfNeeded()
         }
         settingsController.close()
 
@@ -170,5 +204,79 @@ final class VisualPreviewTests: XCTestCase {
             }
         }
         return nil
+    }
+
+    private func assertFormGrid(
+        in root: NSView,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let grid = findGridView(in: root) else {
+            return XCTFail("Missing settings form grid", file: file, line: line)
+        }
+        XCTAssertEqual(grid.columnSpacing, 10, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(grid.rowAlignment, .none, file: file, line: line)
+        XCTAssertEqual(grid.yPlacement, .center, file: file, line: line)
+        XCTAssertEqual(grid.column(at: 0).width, 120, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(grid.column(at: 0).xPlacement, .leading, file: file, line: line)
+        var labelLeadingEdges: [CGFloat] = []
+        for rowIndex in 0..<grid.numberOfRows {
+            let row = grid.row(at: rowIndex)
+            XCTAssertEqual(row.yPlacement, .center, file: file, line: line)
+            guard let label = row.cell(at: 0).contentView,
+                  let control = row.cell(at: 1).contentView else { continue }
+            let labelFrame = visibleAlignmentFrame(of: label, in: root)
+            let controlFrame = visibleAlignmentFrame(of: control, in: root)
+            labelLeadingEdges.append(labelFrame.minX)
+            XCTAssertEqual(labelFrame.midY, controlFrame.midY, accuracy: 0.5, file: file, line: line)
+            if let textField = label as? NSTextField {
+                XCTAssertTrue(
+                    textField.stringValue.hasSuffix(":") || textField.stringValue.hasSuffix("："),
+                    "Missing form-label separator: \(textField.stringValue)",
+                    file: file,
+                    line: line
+                )
+            }
+        }
+        if let reference = labelLeadingEdges.first {
+            for position in labelLeadingEdges.dropFirst() {
+                XCTAssertEqual(position, reference, accuracy: 0.5, file: file, line: line)
+            }
+        }
+    }
+
+    private func assertLeadingEdges(
+        _ identifiers: [String],
+        in root: NSView,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let positions = identifiers.compactMap { identifier -> CGFloat? in
+            guard let view = findView(identifier: identifier, in: root) else {
+                XCTFail("Missing view \(identifier)", file: file, line: line)
+                return nil
+            }
+            return visibleAlignmentFrame(of: view, in: root).minX
+        }
+        guard let reference = positions.first else { return }
+        for position in positions.dropFirst() {
+            XCTAssertEqual(position, reference, accuracy: 0.5, file: file, line: line)
+        }
+    }
+
+    private func findGridView(in view: NSView) -> NSGridView? {
+        if let grid = view as? NSGridView { return grid }
+        return view.subviews.lazy.compactMap { self.findGridView(in: $0) }.first
+    }
+
+    private func visibleAlignmentFrame(of view: NSView, in root: NSView) -> NSRect {
+        let frame = view.convert(view.bounds, to: root)
+        let insets = view.alignmentRectInsets
+        return NSRect(
+            x: frame.minX + insets.left,
+            y: frame.minY + insets.bottom,
+            width: frame.width - insets.left - insets.right,
+            height: frame.height - insets.top - insets.bottom
+        )
     }
 }

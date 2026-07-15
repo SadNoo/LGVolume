@@ -29,15 +29,20 @@ final class WebOSIntegrationTests: XCTestCase {
             return XCTFail("Could not read TV volume: \(volumeResult)")
         }
 
-        let testVolume = volumeStatus.volume <= 95 ? volumeStatus.volume + 5 : volumeStatus.volume - 5
+        let direction = volumeStatus.volume < 100 ? 1 : -1
+        let testVolume = volumeStatus.volume + direction
         let executor = VolumeCommandExecutor(controller: client, verificationFailure: { "TV did not apply volume" })
         let changedVolumeResult = await executeVolume(executor, target: testVolume, current: volumeStatus.volume)
-        let restoreVolumeResult = await executeVolume(executor, target: volumeStatus.volume, current: testVolume)
 
         guard case .success(let changedVolume) = changedVolumeResult,
-              changedVolume.volume == testVolume else {
+              (direction > 0 ? changedVolume.volume > volumeStatus.volume : changedVolume.volume < volumeStatus.volume) else {
             return XCTFail("TV did not apply diagnostic volume \(testVolume): \(changedVolumeResult)")
         }
+        let restoreVolumeResult = await executeVolume(
+            executor,
+            target: volumeStatus.volume,
+            current: changedVolume.volume
+        )
         guard case .success(let restoredVolume) = restoreVolumeResult,
               restoredVolume.volume == volumeStatus.volume else {
             return XCTFail("Could not restore original volume \(volumeStatus.volume): \(restoreVolumeResult)")

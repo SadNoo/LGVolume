@@ -3,37 +3,39 @@ import XCTest
 
 @MainActor
 final class VolumeCommandExecutorTests: XCTestCase {
-    func testVerifiesSuccessfulSteppedCommand() {
-        let controller = FakeVolumeController(volumes: [55])
+    func testVerifiesSuccessfulNativeStep() {
+        let controller = FakeVolumeController(volumes: [51])
         let executor = makeExecutor(controller)
         var result: LGResult<TVVolumeStatus>?
 
-        executor.execute(target: 55, current: 50) { result = $0 }
+        executor.execute(target: 51, current: 50) { result = $0 }
 
-        XCTAssertEqual(controller.stepDeltas, [5])
+        XCTAssertEqual(controller.stepDeltas, [1])
         XCTAssertTrue(controller.absoluteTargets.isEmpty)
-        XCTAssertEqual(result?.value?.volume, 55)
+        XCTAssertEqual(result?.value?.volume, 51)
     }
 
-    func testRetriesWithAbsoluteVolumeWhenStepResponseDidNotChangeTV() {
-        let controller = FakeVolumeController(volumes: [50, 50, 55])
+    func testNativeStepAcceptsTVReportedJumpWithoutAbsoluteFallback() {
+        let controller = FakeVolumeController(volumes: [53])
         let executor = makeExecutor(controller)
         var result: LGResult<TVVolumeStatus>?
 
-        executor.execute(target: 55, current: 50) { result = $0 }
+        executor.execute(target: 51, current: 50) { result = $0 }
 
-        XCTAssertEqual(controller.stepDeltas, [5])
-        XCTAssertEqual(controller.absoluteTargets, [55])
-        XCTAssertEqual(result?.value?.volume, 55)
+        XCTAssertEqual(controller.stepDeltas, [1])
+        XCTAssertTrue(controller.absoluteTargets.isEmpty)
+        XCTAssertEqual(result?.value?.volume, 53)
     }
 
-    func testReportsFailureWhenBothStrategiesLeaveVolumeUnchanged() {
-        let controller = FakeVolumeController(volumes: [50, 50, 50])
+    func testNativeStepDoesNotFallbackToAbsoluteVolumeWhenTVIsUnchanged() {
+        let controller = FakeVolumeController(volumes: [50])
         let executor = makeExecutor(controller)
         var result: LGResult<TVVolumeStatus>?
 
-        executor.execute(target: 55, current: 50) { result = $0 }
+        executor.execute(target: 51, current: 50) { result = $0 }
 
+        XCTAssertEqual(controller.stepDeltas, [1])
+        XCTAssertTrue(controller.absoluteTargets.isEmpty)
         guard case .failure(let message) = result else {
             return XCTFail("Expected verified failure")
         }

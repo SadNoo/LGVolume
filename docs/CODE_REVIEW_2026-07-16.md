@@ -2,7 +2,7 @@
 
 ## Implemented improvements
 
-1. Volume commands are read back from the TV. A mismatched or rejected command retries once with the alternate absolute/stepped API.
+1. Volume commands are read back from the TV. Native keyboard steps never fall back to an absolute percentage; larger direct targets can retry once with the stepped API.
 2. Local diagnostics record request URIs, state transitions, retries, and failures. IPv4 addresses and pairing tokens are redacted; logs rotate at 512 KiB.
 3. `make tv-test` performs an opt-in real-TV test and restores volume and mute state. HDMI is switched only to the already active input.
 4. Response parsing, registration data, token storage, diagnostics, and volume execution are separated from the WebSocket and coordinator code.

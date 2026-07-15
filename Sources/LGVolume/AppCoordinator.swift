@@ -38,6 +38,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var isConnecting = false
     private var pendingConnectionActions: [PendingConnectionAction] = []
     private var pendingVolumeTarget: Int?
+    private var activeVolumeTarget: Int?
     private var volumeCommandInFlight = false
     private var volumeCommandGeneration = 0
     private var activeVolumeCommandGeneration: Int?
@@ -460,6 +461,7 @@ final class AppCoordinator: ObservableObject {
             return
         }
         pendingVolumeTarget = nil
+        activeVolumeTarget = target
         volumeCommandInFlight = true
         volumeCommandGeneration += 1
         let generation = volumeCommandGeneration
@@ -468,6 +470,7 @@ final class AppCoordinator: ObservableObject {
             self?.performVolumeCommand(target: target, generation: generation)
         }, onFailure: { [weak self] in
             self?.pendingVolumeTarget = nil
+            self?.activeVolumeTarget = nil
             self?.volumeCommandInFlight = false
             self?.activeVolumeCommandGeneration = nil
         })
@@ -478,9 +481,6 @@ final class AppCoordinator: ObservableObject {
             return
         }
         let current = settings.volume
-        settings.volume = target
-        settings.muted = false
-        syncMenuState()
 
         volumeExecutor.execute(target: target, current: current) { [weak self] result in
             self?.finishVolumeCommand(result, target: target, generation: generation)
@@ -502,8 +502,14 @@ final class AppCoordinator: ObservableObject {
             status = message
             logger.log("volume", "command failed after verification: \(message)")
         }
+        if let queuedTarget = pendingVolumeTarget {
+            let completedTarget = activeVolumeTarget ?? target
+            let remainingDelta = queuedTarget - completedTarget
+            pendingVolumeTarget = min(max(settings.volume + remainingDelta, 0), 100)
+        }
         syncMenuState()
         volumeCommandInFlight = false
+        activeVolumeTarget = nil
         activeVolumeCommandGeneration = nil
         if pendingVolumeTarget != nil {
             processPendingVolumeTarget()
@@ -562,7 +568,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     func adjustVolumeFromPanel(delta: Int) {
-        let baseVolume = pendingVolumeTarget ?? settings.volume
+        let baseVolume = pendingVolumeTarget ?? activeVolumeTarget ?? settings.volume
         let target = min(max(baseVolume + delta, 0), 100)
         setVolumeFromPanel(target)
     }
@@ -728,6 +734,7 @@ final class AppCoordinator: ObservableObject {
 
     private func resetActiveCommands() {
         pendingVolumeTarget = nil
+        activeVolumeTarget = nil
         volumeCommandInFlight = false
         activeVolumeCommandGeneration = nil
         muteCommandGeneration += 1
@@ -744,5 +751,5 @@ final class AppCoordinator: ObservableObject {
         return controller
     }
 
-    private static let keyboardVolumeStep = 5
+    private static let keyboardVolumeStep = 1
 }

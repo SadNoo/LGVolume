@@ -43,7 +43,12 @@ final class VolumeCommandExecutor {
             return
         }
 
-        let primary: Strategy = abs(target - current) <= 5 ? .stepped : .absolute
+        if abs(target - current) == 1 {
+            executeNativeStep(target: target, current: current, completion: completion)
+            return
+        }
+
+        let primary: Strategy = .absolute
         logger.log("volume", "command target=\(target) current=\(current) primary=\(primary)")
         send(primary, target: target, current: current) { [weak self] result in
             guard let self else { return }
@@ -64,6 +69,42 @@ final class VolumeCommandExecutor {
                                 completion: completion
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    private func executeNativeStep(
+        target: Int,
+        current: Int,
+        completion: @escaping (LGResult<TVVolumeStatus>) -> Void
+    ) {
+        let direction = target > current ? 1 : -1
+        logger.log("volume", "native step direction=\(direction) current=\(current)")
+        controller.changeVolume(delta: direction) { [weak self] result in
+            guard let self else { return }
+            guard case .success = result else {
+                completion(.failure(self.verificationFailure()))
+                return
+            }
+            self.delay(0.35) {
+                self.controller.getVolume { result in
+                    switch result {
+                    case .success(let status)
+                        where (direction > 0 && status.volume > current)
+                            || (direction < 0 && status.volume < current):
+                        self.logger.log("volume", "native step verified actual=\(status.volume)")
+                        completion(.success(status))
+                    case .success(let status):
+                        self.logger.log(
+                            "volume",
+                            "native step unchanged direction=\(direction) current=\(current) actual=\(status.volume)"
+                        )
+                        completion(.failure(self.verificationFailure()))
+                    case .failure(let message):
+                        self.logger.log("volume", "native step read failed: \(message)")
+                        completion(.failure(message))
                     }
                 }
             }

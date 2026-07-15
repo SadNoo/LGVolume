@@ -202,8 +202,15 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         ipField.delegate = self
         ipField.identifier = NSUserInterfaceItemIdentifier("settings.ip")
         nameField.identifier = NSUserInterfaceItemIdentifier("settings.name")
+        appearanceControl.identifier = NSUserInterfaceItemIdentifier("settings.appearance")
+        languageControl.identifier = NSUserInterfaceItemIdentifier("settings.language")
+        launchAtLoginButton.identifier = NSUserInterfaceItemIdentifier("settings.launchAtLogin")
+        secureConnectionButton.identifier = NSUserInterfaceItemIdentifier("settings.secureConnection")
+        diagnosticsButton.identifier = NSUserInterfaceItemIdentifier("settings.diagnostics")
         useTVInputNamesButton.identifier = NSUserInterfaceItemIdentifier("settings.useTVInputNames")
         detectedInputNamesLabel.identifier = NSUserInterfaceItemIdentifier("settings.detectedInputNames")
+        ipFeedbackLabel.identifier = NSUserInterfaceItemIdentifier("settings.ipFeedback")
+        restoreHDMIShortcutsButton.identifier = NSUserInterfaceItemIdentifier("settings.restoreHDMIShortcuts")
         saveButton.identifier = NSUserInterfaceItemIdentifier("settings.save")
         configureTextField(ipField)
         configureTextField(nameField)
@@ -219,9 +226,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             field.identifier = NSUserInterfaceItemIdentifier("settings.hdmiName\(index + 1)")
         }
 
-        for field in hdmiShortcutFields {
+        for (index, field) in hdmiShortcutFields.enumerated() {
+            field.identifier = NSUserInterfaceItemIdentifier("settings.hdmiShortcut\(index + 1)")
             field.alignment = .center
             field.widthAnchor.constraint(equalToConstant: 360).isActive = true
+            field.heightAnchor.constraint(equalToConstant: Self.formControlHeight).isActive = true
         }
 
         pageControl.target = self
@@ -234,8 +243,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         appearanceControl.target = self
         appearanceControl.action = #selector(changeAppearance)
+        appearanceControl.heightAnchor.constraint(equalToConstant: Self.formControlHeight).isActive = true
         languageControl.target = self
         languageControl.action = #selector(changeLanguage)
+        languageControl.heightAnchor.constraint(equalToConstant: Self.formControlHeight).isActive = true
         launchAtLoginButton.target = self
         launchAtLoginButton.action = #selector(changeLaunchAtLogin)
         secureConnectionButton.target = self
@@ -378,20 +389,18 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         stack.addArrangedSubview(pageSeparatorLine())
 
         ipFeedbackLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        stack.addArrangedSubview(formRow(label: fixedLabel("LG TV IP:"), control: ipField))
-        stack.addArrangedSubview(formRow(label: fixedLabel(.displayName), control: nameField))
-
-        let feedbackRow = row()
-        feedbackRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
-        feedbackRow.addArrangedSubview(ipFeedbackLabel)
-        stack.addArrangedSubview(feedbackRow)
-
         let actionRow = row()
-        actionRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
+        actionRow.identifier = NSUserInterfaceItemIdentifier("settings.generalActions")
         actionRow.addArrangedSubview(connectButton)
         actionRow.addArrangedSubview(repairButton)
         actionRow.addArrangedSubview(syncVolumeButton)
-        stack.addArrangedSubview(actionRow)
+
+        stack.addArrangedSubview(formGrid([
+            (fixedLabel("LG TV IP:"), ipField),
+            (fixedLabel(.displayName), nameField),
+            (nil, ipFeedbackLabel),
+            (nil, actionRow)
+        ]))
 
         return pageBox(stack)
     }
@@ -399,30 +408,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private func preferencesPage() -> NSView {
         let stack = pageStack()
 
-        let appearanceRow = row()
-        appearanceRow.addArrangedSubview(fixedLabel(.appearance))
-        appearanceRow.addArrangedSubview(appearanceControl)
-        stack.addArrangedSubview(appearanceRow)
-
-        let languageRow = row()
-        languageRow.addArrangedSubview(fixedLabel(.language))
-        languageRow.addArrangedSubview(languageControl)
-        stack.addArrangedSubview(languageRow)
-
-        let loginRow = row()
-        loginRow.addArrangedSubview(fixedLabel(.launch))
-        loginRow.addArrangedSubview(launchAtLoginButton)
-        stack.addArrangedSubview(loginRow)
-
-        let secureRow = row()
-        secureRow.addArrangedSubview(fixedLabel(.connection))
-        secureRow.addArrangedSubview(secureConnectionButton)
-        stack.addArrangedSubview(secureRow)
-
-        let diagnosticsRow = row()
-        diagnosticsRow.addArrangedSubview(fixedLabel(.diagnostics))
-        diagnosticsRow.addArrangedSubview(diagnosticsButton)
-        stack.addArrangedSubview(diagnosticsRow)
+        stack.addArrangedSubview(formGrid([
+            (fixedLabel(.appearance), appearanceControl),
+            (fixedLabel(.language), languageControl),
+            (fixedLabel(.launch), launchAtLoginButton),
+            (fixedLabel(.connection), secureConnectionButton),
+            (fixedLabel(.diagnostics), diagnosticsButton)
+        ]))
 
         return pageBox(stack)
     }
@@ -430,26 +422,20 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private func hdmiPage() -> NSView {
         let stack = pageStack()
 
-        let modeRow = row()
-        modeRow.addArrangedSubview(fixedLabel(.inputNames))
-        modeRow.addArrangedSubview(useTVInputNamesButton)
-        stack.addArrangedSubview(modeRow)
-
-        let detectedRow = row()
-        detectedRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
         detectedInputNamesLabel.font = .systemFont(ofSize: 12)
         detectedInputNamesLabel.textColor = .secondaryLabelColor
         detectedInputNamesLabel.lineBreakMode = .byTruncatingTail
         if detectedInputNamesLabel.constraints.first(where: { $0.firstAttribute == .width }) == nil {
             detectedInputNamesLabel.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
-        detectedRow.addArrangedSubview(detectedInputNamesLabel)
-        stack.addArrangedSubview(detectedRow)
-
-        stack.addArrangedSubview(formRow(label: fixedLabel("HDMI1:"), control: hdmiNameFields[0]))
-        stack.addArrangedSubview(formRow(label: fixedLabel("HDMI2:"), control: hdmiNameFields[1]))
-        stack.addArrangedSubview(formRow(label: fixedLabel("HDMI3:"), control: hdmiNameFields[2]))
-        stack.addArrangedSubview(formRow(label: fixedLabel("HDMI4:"), control: hdmiNameFields[3]))
+        stack.addArrangedSubview(formGrid([
+            (fixedLabel(.inputNames), useTVInputNamesButton),
+            (nil, detectedInputNamesLabel),
+            (fixedLabel("HDMI1:"), hdmiNameFields[0]),
+            (fixedLabel("HDMI2:"), hdmiNameFields[1]),
+            (fixedLabel("HDMI3:"), hdmiNameFields[2]),
+            (fixedLabel("HDMI4:"), hdmiNameFields[3])
+        ]))
         return pageBox(stack)
     }
 
@@ -468,15 +454,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         stack.addArrangedSubview(pageSeparatorLine())
 
-        stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut1), control: hdmiShortcutFields[0]))
-        stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut2), control: hdmiShortcutFields[1]))
-        stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut3), control: hdmiShortcutFields[2]))
-        stack.addArrangedSubview(formRow(label: fixedLabel(.hdmiShortcut4), control: hdmiShortcutFields[3]))
-
-        let restoreRow = row()
-        restoreRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
-        restoreRow.addArrangedSubview(restoreHDMIShortcutsButton)
-        stack.addArrangedSubview(restoreRow)
+        stack.addArrangedSubview(formGrid([
+            (fixedLabel(.hdmiShortcut1), hdmiShortcutFields[0]),
+            (fixedLabel(.hdmiShortcut2), hdmiShortcutFields[1]),
+            (fixedLabel(.hdmiShortcut3), hdmiShortcutFields[2]),
+            (fixedLabel(.hdmiShortcut4), hdmiShortcutFields[3]),
+            (nil, restoreHDMIShortcutsButton)
+        ]))
 
         return pageBox(stack)
     }
@@ -512,28 +496,46 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         return stack
     }
 
-    private func formRow(label: NSTextField, control: NSView) -> NSStackView {
-        let stack = row()
-        stack.alignment = .firstBaseline
-        stack.addArrangedSubview(label)
-        stack.addArrangedSubview(control)
-        return stack
+    private func formGrid(_ rows: [(label: NSTextField?, control: NSView)]) -> NSGridView {
+        let grid = NSGridView(views: rows.map { row in
+            [row.label ?? NSGridCell.emptyContentView, row.control]
+        })
+        grid.columnSpacing = 10
+        grid.rowSpacing = 4
+        grid.rowAlignment = .none
+        grid.yPlacement = .center
+        grid.column(at: 0).width = Self.labelColumnWidth
+        grid.column(at: 0).xPlacement = .leading
+        grid.column(at: 1).xPlacement = .leading
+        for index in 0..<grid.numberOfRows {
+            let row = grid.row(at: index)
+            row.yPlacement = .center
+            let control = rows[index].control
+            row.height = control === ipFeedbackLabel || control === detectedInputNamesLabel
+                ? Self.secondaryRowHeight
+                : Self.formRowHeight
+        }
+        return grid
     }
 
     private func fixedLabel(_ key: L10n.Key) -> NSTextField {
-        let field = label(t(key))
-        field.alignment = .right
+        let field = label(formLabelText(t(key)))
+        field.alignment = .left
         field.font = Self.formFont
-        field.widthAnchor.constraint(equalToConstant: Self.labelColumnWidth).isActive = true
         return field
     }
 
     private func fixedLabel(_ text: String) -> NSTextField {
-        let field = label(text)
-        field.alignment = .right
+        let field = label(formLabelText(text))
+        field.alignment = .left
         field.font = Self.formFont
-        field.widthAnchor.constraint(equalToConstant: Self.labelColumnWidth).isActive = true
         return field
+    }
+
+    private func formLabelText(_ text: String) -> String {
+        let base = text.trimmingCharacters(in: CharacterSet(charactersIn: " :："))
+        let separator = L10n.resolvedLanguage(from: settings.languageMode) == "en" ? ":" : "："
+        return base + separator
     }
 
     private func configureTextField(_ field: NSTextField) {
@@ -544,6 +546,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         field.cell?.usesSingleLineMode = true
         field.cell?.wraps = false
         field.cell?.isScrollable = true
+        field.heightAnchor.constraint(equalToConstant: Self.formControlHeight).isActive = true
     }
 
     private func label(_ text: String) -> NSTextField {
@@ -763,4 +766,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private static let formFont = NSFont.systemFont(ofSize: 15)
     private static let labelColumnWidth: CGFloat = 120
+    private static let formRowHeight: CGFloat = 30
+    private static let secondaryRowHeight: CGFloat = 20
+    private static let formControlHeight: CGFloat = 28
 }
