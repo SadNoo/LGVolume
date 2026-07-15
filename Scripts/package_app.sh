@@ -2,6 +2,8 @@
 set -euo pipefail
 
 APP_NAME="LGVolume"
+VERSION="$(tr -d '[:space:]' < VERSION)"
+BUILD_NUMBER="$(tr -d '[:space:]' < BUILD_NUMBER)"
 BUILD_CONFIGURATION="release"
 DIST_DIR="dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
@@ -16,6 +18,8 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp ".build/arm64-apple-macosx/$BUILD_CONFIGURATION/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 cp "Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$CONTENTS_DIR/Info.plist"
 if [[ -f "Resources/AppIcon.icns" ]]; then
   cp "Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 fi

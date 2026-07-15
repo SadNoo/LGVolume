@@ -7,7 +7,7 @@ final class AppSettingsTests: XCTestCase {
         let suiteName = "local.codex.lgvolume.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let settings = AppSettings(defaults: defaults, clientKeyStorage: MemoryClientKeyStorage())
+        let settings = AppSettings(defaults: defaults, tokenStore: MemoryPairingTokenStore())
 
         XCTAssertNotNil(settings.hdmiShortcut(1))
         settings.setHDMIShortcut(nil, index: 1)
@@ -17,16 +17,20 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNotNil(settings.hdmiShortcut(1))
     }
 
-    func testMigratesLegacyClientKeyOutOfDefaults() {
+    func testClientKeyPersistsInTokenStoreAndCanBeCleared() {
         let suiteName = "local.codex.lgvolume.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        defaults.set("legacy-key", forKey: "clientKey")
+        let tokenStore = MemoryPairingTokenStore()
+        let settings = AppSettings(defaults: defaults, tokenStore: tokenStore)
+        settings.saveClientKey("paired-key")
 
-        let storage = MemoryClientKeyStorage()
-        let settings = AppSettings(defaults: defaults, clientKeyStorage: storage)
+        XCTAssertEqual(settings.clientKey, "paired-key")
+        XCTAssertEqual(tokenStore.token, "paired-key")
+        XCTAssertNil(defaults.string(forKey: "clientKey"))
 
-        XCTAssertEqual(settings.clientKey, "legacy-key")
+        settings.clearClientKey()
+        XCTAssertTrue(settings.clientKey.isEmpty)
         XCTAssertNil(defaults.string(forKey: "clientKey"))
     }
 
@@ -34,27 +38,22 @@ final class AppSettingsTests: XCTestCase {
         let suiteName = "local.codex.lgvolume.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let settings = AppSettings(defaults: defaults, clientKeyStorage: MemoryClientKeyStorage())
+        let settings = AppSettings(defaults: defaults, tokenStore: MemoryPairingTokenStore())
 
         XCTAssertFalse(settings.secureConnectionOnly)
         settings.secureConnectionOnly = true
         XCTAssertTrue(settings.secureConnectionOnly)
     }
-}
 
-private final class MemoryClientKeyStorage: ClientKeyStorage {
-    private var value = ""
+    func testTVInputNamePreferenceDefaultsToFalseAndPersists() {
+        let suiteName = "local.codex.lgvolume.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(defaults: defaults, tokenStore: MemoryPairingTokenStore())
 
-    func read() -> String {
-        value
+        XCTAssertFalse(settings.useTVInputNames)
+        settings.useTVInputNames = true
+        XCTAssertTrue(settings.useTVInputNames)
     }
 
-    func save(_ value: String) -> Bool {
-        self.value = value
-        return true
-    }
-
-    func clear() {
-        value = ""
-    }
 }

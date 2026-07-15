@@ -14,7 +14,7 @@ struct LGVolumeApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuBarControlView(coordinator: coordinator)
-                .frame(width: 184)
+                .frame(width: coordinator.menuPreferredWidth)
                 .onAppear {
                     coordinator.refreshTVState()
                 }

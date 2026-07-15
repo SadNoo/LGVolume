@@ -2,15 +2,15 @@ import Foundation
 
 final class AppSettings {
     private let defaults: UserDefaults
-    private let clientKeyStorage: ClientKeyStorage
+    private let tokenStore: PairingTokenStoring
 
     init(
         defaults: UserDefaults = UserDefaults(suiteName: "local.codex.lgvolume") ?? .standard,
-        clientKeyStorage: ClientKeyStorage = KeychainClientKeyStorage()
+        tokenStore: PairingTokenStoring = FilePairingTokenStore()
     ) {
         self.defaults = defaults
-        self.clientKeyStorage = clientKeyStorage
-        migrateLegacyClientKeyIfNeeded()
+        self.tokenStore = tokenStore
+        migratePreferencesTokenIfNeeded()
     }
 
     private enum Key {
@@ -25,6 +25,7 @@ final class AppSettings {
         static let launchAtLogin = "launchAtLogin"
         static let languageMode = "languageMode"
         static let secureConnectionOnly = "secureConnectionOnly"
+        static let useTVInputNames = "useTVInputNames"
     }
 
     var tvIP: String {
@@ -41,8 +42,12 @@ final class AppSettings {
     }
 
     var clientKey: String {
-        get { clientKeyStorage.read() }
-        set { clientKeyStorage.save(newValue) }
+        tokenStore.read()
+    }
+
+    @discardableResult
+    func saveClientKey(_ value: String) -> Bool {
+        tokenStore.save(value)
     }
 
     var volume: Int {
@@ -104,7 +109,7 @@ final class AppSettings {
     }
 
     func clearClientKey() {
-        clientKeyStorage.clear()
+        tokenStore.clear()
         defaults.removeObject(forKey: Key.clientKey)
     }
 
@@ -138,11 +143,14 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: Key.secureConnectionOnly) }
     }
 
-    private func migrateLegacyClientKeyIfNeeded() {
-        guard let legacyKey = defaults.string(forKey: Key.clientKey), !legacyKey.isEmpty else {
-            return
-        }
-        if !clientKeyStorage.read().isEmpty || clientKeyStorage.save(legacyKey) {
+    var useTVInputNames: Bool {
+        get { defaults.bool(forKey: Key.useTVInputNames) }
+        set { defaults.set(newValue, forKey: Key.useTVInputNames) }
+    }
+
+    private func migratePreferencesTokenIfNeeded() {
+        guard let legacyToken = defaults.string(forKey: Key.clientKey), !legacyToken.isEmpty else { return }
+        if !tokenStore.read().isEmpty || tokenStore.save(legacyToken) {
             defaults.removeObject(forKey: Key.clientKey)
         }
     }

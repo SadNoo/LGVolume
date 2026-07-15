@@ -64,14 +64,18 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let languageControl = NSSegmentedControl(labels: ["自动", "中文", "English", "日本語"], trackingMode: .selectOne, target: nil, action: nil)
     private let launchAtLoginButton = NSButton(checkboxWithTitle: "登录时自动启动 LGVolume", target: nil, action: nil)
     private let secureConnectionButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let useTVInputNamesButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let detectedInputNamesLabel = NSTextField(labelWithString: "")
     private let ipField = NSTextField()
     private let nameField = NSTextField()
     private let hdmiNameFields = (0..<4).map { _ in NSTextField() }
     private let hdmiShortcutFields = (0..<4).map { _ in ShortcutRecorderField() }
     private let connectButton = NSButton(title: "", target: nil, action: nil)
+    private let repairButton = NSButton(title: "", target: nil, action: nil)
     private let saveButton = NSButton(title: "", target: nil, action: nil)
     private let syncVolumeButton = NSButton(title: "", target: nil, action: nil)
     private let restoreHDMIShortcutsButton = NSButton(title: "", target: nil, action: nil)
+    private let diagnosticsButton = NSButton(title: "", target: nil, action: nil)
     private var renderedLanguageMode: String?
     private var hasLoadedEditableValues = false
 
@@ -102,6 +106,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         launchAtLoginButton.state = coordinator?.launchAtLogin == true ? .on : .off
         launchAtLoginButton.toolTip = coordinator?.launchAtLoginRequiresApproval == true ? t(.launchRequiresApproval) : nil
         secureConnectionButton.state = settings.secureConnectionOnly ? .on : .off
+        useTVInputNamesButton.state = settings.useTVInputNames ? .on : .off
         updateAppearanceSelection()
         updateLanguageSelection()
         updateShortcutStatus()
@@ -111,6 +116,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             updateStatus()
         }
         updateIPFeedback()
+        updateHDMIInputMode()
     }
 
     func refreshLocalizedText() {
@@ -133,13 +139,16 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         launchAtLoginButton.title = t(.launchAtLogin)
         secureConnectionButton.title = t(.secureConnectionOnly)
+        useTVInputNamesButton.title = t(.useTVInputNames)
         ipField.placeholderString = t(.inputIP)
         volumeTitleLabel.stringValue = "\(t(.volume))："
         shortcutStateLabel.stringValue = t(.shortcutsEnabled)
         connectButton.title = coordinator?.isConnected == true ? t(.disconnect) : t(.pairConnect)
+        repairButton.title = t(.repairPairing)
         saveButton.title = t(.save)
         syncVolumeButton.title = t(.syncVolume)
         restoreHDMIShortcutsButton.title = t(.restoreHDMIShortcuts)
+        diagnosticsButton.title = t(.openDiagnostics)
         updatePageSelection()
         for field in hdmiShortcutFields {
             field.recordingPlaceholder = t(.pressShortcut)
@@ -191,6 +200,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         volumePercentLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         ipField.delegate = self
+        ipField.identifier = NSUserInterfaceItemIdentifier("settings.ip")
+        nameField.identifier = NSUserInterfaceItemIdentifier("settings.name")
+        useTVInputNamesButton.identifier = NSUserInterfaceItemIdentifier("settings.useTVInputNames")
+        detectedInputNamesLabel.identifier = NSUserInterfaceItemIdentifier("settings.detectedInputNames")
+        saveButton.identifier = NSUserInterfaceItemIdentifier("settings.save")
         configureTextField(ipField)
         configureTextField(nameField)
         ipField.widthAnchor.constraint(equalToConstant: 420).isActive = true
@@ -200,6 +214,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             field.placeholderString = "HDMI"
             configureTextField(field)
             field.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        }
+        for (index, field) in hdmiNameFields.enumerated() {
+            field.identifier = NSUserInterfaceItemIdentifier("settings.hdmiName\(index + 1)")
         }
 
         for field in hdmiShortcutFields {
@@ -223,16 +240,24 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         launchAtLoginButton.action = #selector(changeLaunchAtLogin)
         secureConnectionButton.target = self
         secureConnectionButton.action = #selector(save)
+        useTVInputNamesButton.target = self
+        useTVInputNamesButton.action = #selector(changeHDMIInputMode)
 
         connectButton.target = self
         connectButton.action = #selector(connectOrDisconnect)
         connectButton.bezelStyle = .rounded
+        repairButton.target = self
+        repairButton.action = #selector(repairPairing)
+        repairButton.bezelStyle = .rounded
         syncVolumeButton.target = self
         syncVolumeButton.action = #selector(refreshVolume)
         syncVolumeButton.bezelStyle = .rounded
         restoreHDMIShortcutsButton.target = self
         restoreHDMIShortcutsButton.action = #selector(restoreHDMIShortcuts)
         restoreHDMIShortcutsButton.bezelStyle = .rounded
+        diagnosticsButton.target = self
+        diagnosticsButton.action = #selector(openDiagnostics)
+        diagnosticsButton.bezelStyle = .rounded
         saveButton.target = self
         saveButton.action = #selector(save)
         saveButton.bezelStyle = .rounded
@@ -364,6 +389,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let actionRow = row()
         actionRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
         actionRow.addArrangedSubview(connectButton)
+        actionRow.addArrangedSubview(repairButton)
         actionRow.addArrangedSubview(syncVolumeButton)
         stack.addArrangedSubview(actionRow)
 
@@ -393,11 +419,33 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         secureRow.addArrangedSubview(secureConnectionButton)
         stack.addArrangedSubview(secureRow)
 
+        let diagnosticsRow = row()
+        diagnosticsRow.addArrangedSubview(fixedLabel(.diagnostics))
+        diagnosticsRow.addArrangedSubview(diagnosticsButton)
+        stack.addArrangedSubview(diagnosticsRow)
+
         return pageBox(stack)
     }
 
     private func hdmiPage() -> NSView {
         let stack = pageStack()
+
+        let modeRow = row()
+        modeRow.addArrangedSubview(fixedLabel(.inputNames))
+        modeRow.addArrangedSubview(useTVInputNamesButton)
+        stack.addArrangedSubview(modeRow)
+
+        let detectedRow = row()
+        detectedRow.addArrangedSubview(spacer(width: Self.labelColumnWidth + 10))
+        detectedInputNamesLabel.font = .systemFont(ofSize: 12)
+        detectedInputNamesLabel.textColor = .secondaryLabelColor
+        detectedInputNamesLabel.lineBreakMode = .byTruncatingTail
+        if detectedInputNamesLabel.constraints.first(where: { $0.firstAttribute == .width }) == nil {
+            detectedInputNamesLabel.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        }
+        detectedRow.addArrangedSubview(detectedInputNamesLabel)
+        stack.addArrangedSubview(detectedRow)
+
         stack.addArrangedSubview(formRow(label: fixedLabel("HDMI1:"), control: hdmiNameFields[0]))
         stack.addArrangedSubview(formRow(label: fixedLabel("HDMI2:"), control: hdmiNameFields[1]))
         stack.addArrangedSubview(formRow(label: fixedLabel("HDMI3:"), control: hdmiNameFields[2]))
@@ -437,8 +485,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 16, right: 18)
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 18, bottom: 8, right: 18)
         return stack
     }
 
@@ -573,12 +621,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         guard !ip.isEmpty else {
             ipFeedbackLabel.stringValue = ""
             connectButton.isEnabled = coordinator?.isConnected == true
+            repairButton.isEnabled = false
             saveButton.isEnabled = true
             return
         }
 
         let valid = LocalNetworkAddress.isAllowedIPv4(ip)
         connectButton.isEnabled = coordinator?.isConnected == true || valid
+        repairButton.isEnabled = valid
         saveButton.isEnabled = ip.isEmpty || valid
         if valid {
             ipFeedbackLabel.stringValue = ""
@@ -586,6 +636,21 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             ipFeedbackLabel.stringValue = t(.invalidIP)
             ipFeedbackLabel.textColor = .systemOrange
         }
+    }
+
+    private func updateHDMIInputMode() {
+        let useTVNames = useTVInputNamesButton.state == .on
+        for (offset, field) in hdmiNameFields.enumerated() {
+            field.isEnabled = !useTVNames
+            field.toolTip = coordinator?.detectedHDMIName(offset + 1)
+        }
+
+        let detectedNames = (1...4).compactMap { index in
+            coordinator?.detectedHDMIName(index).map { "HDMI\(index): \($0)" }
+        }
+        detectedInputNamesLabel.stringValue = detectedNames.isEmpty
+            ? t(.noInputsDetected)
+            : "\(t(.detectedInputs)) \(detectedNames.joined(separator: "  ·  "))"
     }
 
     private func volumeString(volume: Int, muted: Bool) -> String {
@@ -633,6 +698,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         coordinator?.setLanguageMode(modes[index])
     }
 
+    @objc private func changeHDMIInputMode() {
+        updateHDMIInputMode()
+    }
+
     @objc private func changeLaunchAtLogin() {
         coordinator?.setLaunchAtLogin(launchAtLoginButton.state == .on)
     }
@@ -653,7 +722,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             name: nameField.stringValue,
             hdmiNames: hdmiNameFields.map(\.stringValue),
             hdmiShortcuts: hdmiShortcutFields.map(\.shortcut),
-            secureConnectionOnly: secureConnectionButton.state == .on
+            secureConnectionOnly: secureConnectionButton.state == .on,
+            useTVInputNames: useTVInputNamesButton.state == .on
         )
         loadEditableValues()
         updateIPFeedback(text: t(.saveSuccess))
@@ -677,9 +747,18 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         }
     }
 
+    @objc private func repairPairing() {
+        guard commitSettings() else { return }
+        coordinator?.pair()
+    }
+
     @objc private func refreshVolume() {
         guard commitSettings() else { return }
         coordinator?.refreshVolume()
+    }
+
+    @objc private func openDiagnostics() {
+        coordinator?.openDiagnosticsLog()
     }
 
     private static let formFont = NSFont.systemFont(ofSize: 15)

@@ -7,11 +7,51 @@ struct MenuBarControlView: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             volumeControls
+            soundOutputControl
             actionList
         }
         .padding(.horizontal, 12)
         .padding(.top, 14)
         .padding(.bottom, 12)
+    }
+
+    private var soundOutputControl: some View {
+        Menu {
+            ForEach(coordinator.soundOutputOptions) { output in
+                Button {
+                    coordinator.changeSoundOutput(output.id)
+                } label: {
+                    if coordinator.currentSoundOutputID == output.id {
+                        Label(coordinator.soundOutputTitle(output), systemImage: "checkmark")
+                    } else {
+                        Text(coordinator.soundOutputTitle(output))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "hifispeaker.2")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 20)
+                Text(coordinator.currentSoundOutputTitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 30)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .disabled(!coordinator.soundOutputAvailable)
+        .accessibilityLabel(coordinator.text(.soundOutput))
     }
 
     private var header: some View {
@@ -70,6 +110,7 @@ struct MenuBarControlView: View {
                 .buttonStyle(.bordered)
                 .tint(selected ? .accentColor : nil)
                 .disabled(!coordinator.isConnected)
+                .help(coordinator.menuHDMINames[safe: index] ?? "HDMI\(index + 1)")
             }
 
             if !coordinator.isConnected {
