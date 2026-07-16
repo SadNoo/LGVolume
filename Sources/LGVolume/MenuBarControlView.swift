@@ -109,7 +109,7 @@ struct MenuBarControlView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(selected ? .accentColor : nil)
-                .disabled(!coordinator.isConnected)
+                .disabled(!coordinator.isConnected || coordinator.isSwitchingHDMI)
                 .help(coordinator.menuHDMINames[safe: index] ?? "HDMI\(index + 1)")
             }
 

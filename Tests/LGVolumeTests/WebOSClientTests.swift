@@ -60,4 +60,17 @@ final class WebOSClientTests: XCTestCase {
             "tv_speaker"
         )
     }
+
+    func testHDMILaunchFallbackOnlyRunsForServerRejectionWhileConnected() {
+        let serverError: [String: Any] = ["type": "error", "payload": ["error": "rejected"]]
+        let localError: [String: Any] = [
+            "type": "error",
+            "payload": ["error": "disconnected"],
+            "_localFailure": true
+        ]
+
+        XCTAssertTrue(WebOSClient.shouldAttemptHDMILaunchFallback(response: serverError, isConnected: true))
+        XCTAssertFalse(WebOSClient.shouldAttemptHDMILaunchFallback(response: localError, isConnected: true))
+        XCTAssertFalse(WebOSClient.shouldAttemptHDMILaunchFallback(response: serverError, isConnected: false))
+    }
 }

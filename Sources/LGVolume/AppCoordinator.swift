@@ -44,6 +44,7 @@ final class AppCoordinator: ObservableObject {
     private var activeVolumeCommandGeneration: Int?
     private var muteCommandGeneration = 0
     private var hdmiCommandGeneration = 0
+    private var hdmiSwitchCooldownWorkItem: DispatchWorkItem?
     private var externalInputs: [TVExternalInput] = []
     private var foregroundAppID = ""
     private var maintainConnection = false
@@ -62,6 +63,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var connectionState = false
     @Published private(set) var menuHDMINames = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"]
     @Published private(set) var selectedHDMIIndex: Int?
+    @Published private(set) var isSwitchingHDMI = false
     @Published private(set) var currentSoundOutputID = ""
     @Published private(set) var soundOutputAvailable = false
     @Published private(set) var menuLanguageMode = "auto"
@@ -350,14 +352,22 @@ final class AppCoordinator: ObservableObject {
     }
 
     func switchHDMIFromPanel(index: Int) {
-        ensureConnectedThen { [weak self] in
+        guard (1...4).contains(index) else { return }
+        guard !isSwitchingHDMI else {
+            logger.log("hdmi", "ignored overlapping switch index=\(index)")
+            return
+        }
+
+        isSwitchingHDMI = true
+        ensureConnectedThen({ [weak self] in
             guard let self else { return }
             self.hdmiCommandGeneration += 1
             let generation = self.hdmiCommandGeneration
             let inputID = self.externalInputs.first(where: { $0.hdmiIndex == index })?.id
-            self.webOSClient.switchHDMI(index, inputID: inputID) { result in
+            self.logger.log("hdmi", "switch requested index=\(index)")
+            self.webOSClient.switchHDMI(index, inputID: inputID) { [weak self] result in
                 DispatchQueue.main.async {
-                    guard self.hdmiCommandGeneration == generation else { return }
+                    guard let self, self.hdmiCommandGeneration == generation else { return }
                     let name = self.menuHDMINames.indices.contains(index - 1)
                         ? self.menuHDMINames[index - 1]
                         : self.settings.hdmiName(index)
@@ -365,9 +375,27 @@ final class AppCoordinator: ObservableObject {
                         self.selectedHDMIIndex = index
                     }
                     self.handleCommandResult(result, success: name)
+                    self.finishHDMISwitch(generation: generation)
                 }
             }
+        }, onFailure: { [weak self] in
+            self?.isSwitchingHDMI = false
+        })
+    }
+
+    private func finishHDMISwitch(generation: Int) {
+        guard hdmiCommandGeneration == generation else { return }
+        hdmiSwitchCooldownWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.hdmiCommandGeneration == generation else { return }
+            self.hdmiSwitchCooldownWorkItem = nil
+            self.isSwitchingHDMI = false
+            if self.webOSClient.isConnected {
+                self.requestForegroundApp()
+            }
         }
+        hdmiSwitchCooldownWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: workItem)
     }
 
     private func connect(showPairingPrompt: Bool) {
@@ -651,7 +679,9 @@ final class AppCoordinator: ObservableObject {
 
     private func handleExternalInputsResult(_ result: LGResult<[TVExternalInput]>) {
         guard case .success(let inputs) = result else { return }
-        externalInputs = inputs.filter { $0.hdmiIndex != nil }
+        let hdmiInputs = inputs.filter { $0.hdmiIndex != nil }
+        guard hdmiInputs != externalInputs else { return }
+        externalInputs = hdmiInputs
         syncMenuState()
         updateSelectedHDMI()
         settingsWindowController?.refresh()
@@ -665,6 +695,7 @@ final class AppCoordinator: ObservableObject {
 
     private func handleForegroundAppResult(_ result: LGResult<String>) {
         guard case .success(let appID) = result else { return }
+        guard foregroundAppID != appID else { return }
         foregroundAppID = appID
         updateSelectedHDMI()
     }
@@ -738,7 +769,10 @@ final class AppCoordinator: ObservableObject {
         volumeCommandInFlight = false
         activeVolumeCommandGeneration = nil
         muteCommandGeneration += 1
+        hdmiSwitchCooldownWorkItem?.cancel()
+        hdmiSwitchCooldownWorkItem = nil
         hdmiCommandGeneration += 1
+        isSwitchingHDMI = false
     }
 
     private func getSettingsWindowController() -> SettingsWindowController {

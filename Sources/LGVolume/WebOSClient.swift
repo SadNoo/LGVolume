@@ -280,6 +280,10 @@ final class WebOSClient: NSObject {
                 completion(result)
                 return
             }
+            guard Self.shouldAttemptHDMILaunchFallback(response: response, isConnected: self.isConnected) else {
+                completion(result)
+                return
+            }
             self.request(
                 uri: "ssap://system.launcher/launch",
                 payload: ["id": "com.webos.app.hdmi\(safeIndex)"]
@@ -556,7 +560,14 @@ final class WebOSClient: NSObject {
     }
 
     private func errorResponse(_ message: String) -> [String: Any] {
-        ["type": "error", "payload": ["error": message]]
+        ["type": "error", "payload": ["error": message], "_localFailure": true]
+    }
+
+    nonisolated static func shouldAttemptHDMILaunchFallback(
+        response: [String: Any],
+        isConnected: Bool
+    ) -> Bool {
+        isConnected && response["_localFailure"] as? Bool != true
     }
 
     nonisolated static func hdmiIndex(in value: String) -> Int? {
