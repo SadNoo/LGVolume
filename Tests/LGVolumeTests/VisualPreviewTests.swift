@@ -24,12 +24,14 @@ final class VisualPreviewTests: XCTestCase {
 
         let settingsWindow = try XCTUnwrap(settingsController.window)
         let settingsView = try XCTUnwrap(settingsWindow.contentView)
-        let settingsSize = NSSize(width: 720, height: 390)
+        let settingsSize = NSSize(width: 840, height: 430)
+        settingsWindow.appearance = NSAppearance(named: .aqua)
         settingsView.frame.size = settingsSize
         settingsWindow.layoutIfNeeded()
         assertVisibleControl("settings.ip", in: settingsView)
         assertVisibleControl("settings.name", in: settingsView)
         assertVisibleControl("settings.save", in: settingsView)
+        assertVisibleControl("settings.sidebar", in: settingsView)
         assertFormGrid(in: settingsView)
         assertLeadingEdges([
             "settings.ip",
@@ -43,14 +45,12 @@ final class VisualPreviewTests: XCTestCase {
         try render(settingsView, size: settingsSize, to: outputDirectory.appendingPathComponent("settings-general-dark.png"))
         settingsWindow.appearance = NSAppearance(named: .aqua)
         settingsController.refresh()
-        let pageControl = try XCTUnwrap(findSegmentedControl(in: settingsView))
         for (segment, filename) in [
             (1, "settings-preferences.png"),
             (2, "settings-hdmi.png"),
             (3, "settings-shortcuts.png")
         ] {
-            pageControl.selectedSegment = segment
-            _ = pageControl.target?.perform(pageControl.action, with: pageControl)
+            settingsController.selectPage(segment)
             settingsWindow.layoutIfNeeded()
             assertFormGrid(in: settingsView)
             if segment == 1 {
@@ -93,14 +93,10 @@ final class VisualPreviewTests: XCTestCase {
         let menuView = NSHostingView(
             rootView: MenuBarControlView(coordinator: coordinator)
                 .frame(width: coordinator.menuPreferredWidth)
-                .padding(1)
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         )
-        XCTAssertGreaterThan(coordinator.menuPreferredWidth, 184)
-        XCTAssertLessThanOrEqual(coordinator.menuPreferredWidth, 240)
+        XCTAssertEqual(coordinator.menuPreferredWidth, 220)
         menuView.wantsLayer = true
-        let menuSize = NSSize(width: 186, height: max(menuView.fittingSize.height, 360))
+        let menuSize = NSSize(width: coordinator.menuPreferredWidth, height: max(menuView.fittingSize.height, 300))
         let menuWindow = NSWindow(
             contentRect: NSRect(origin: .zero, size: menuSize),
             styleMask: .borderless,
@@ -192,18 +188,6 @@ final class VisualPreviewTests: XCTestCase {
     private func findView(identifier: String, in root: NSView) -> NSView? {
         if root.identifier?.rawValue == identifier { return root }
         return root.subviews.lazy.compactMap { self.findView(identifier: identifier, in: $0) }.first
-    }
-
-    private func findSegmentedControl(in view: NSView) -> NSSegmentedControl? {
-        if let control = view as? NSSegmentedControl, control.segmentCount == 4 {
-            return control
-        }
-        for subview in view.subviews {
-            if let control = findSegmentedControl(in: subview) {
-                return control
-            }
-        }
-        return nil
     }
 
     private func assertFormGrid(

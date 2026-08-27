@@ -44,6 +44,9 @@ final class AppCoordinator: ObservableObject {
     private var activeVolumeCommandGeneration: Int?
     private var muteCommandGeneration = 0
     private var hdmiCommandGeneration = 0
+    private var soundOutputCommandGeneration = 0
+    private var pendingSoundOutputID: String?
+    private var soundOutputConfirmationWorkItem: DispatchWorkItem?
     private var hdmiSwitchCooldownWorkItem: DispatchWorkItem?
     private var externalInputs: [TVExternalInput] = []
     private var foregroundAppID = ""
@@ -67,7 +70,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var currentSoundOutputID = ""
     @Published private(set) var soundOutputAvailable = false
     @Published private(set) var menuLanguageMode = "auto"
-    @Published private(set) var shortcutRegistrationStates = [true, true, true, true] {
+    @Published private(set) var shortcutRegistrationStates = Array(repeating: true, count: 7) {
         didSet { settingsWindowController?.updateShortcutStatus() }
     }
 
@@ -97,8 +100,7 @@ final class AppCoordinator: ObservableObject {
         return soundOutputTitle(option)
     }
     var menuPreferredWidth: CGFloat {
-        let longest = ([menuTitle] + menuHDMINames + [currentSoundOutputTitle]).map(\.count).max() ?? 8
-        return min(240, max(184, CGFloat(164 + max(0, longest - 8) * 4)))
+        220
     }
 
     func soundOutputTitle(_ option: TVSoundOutputOption) -> String {
@@ -422,36 +424,44 @@ final class AppCoordinator: ObservableObject {
             forcePairing: showPairingPrompt,
             secureConnectionOnly: settings.secureConnectionOnly
         ) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isConnecting = false
-                switch result {
-                case .success(let clientKey):
-                    self.cancelReconnect()
-                    self.reconnectAttempt = 0
-                    let saved = clientKey.isEmpty || self.settings.saveClientKey(clientKey)
-                    self.status = saved
-                        ? "\(self.text(.connected)) \(self.settings.tvName)"
-                        : self.text(.pairingTokenSaveFailed)
-                    self.logger.log("connection", "connected tokenSaved=\(saved)")
-                    self.startStateSubscriptions()
-                    self.requestVolume()
-                    self.requestExternalInputs()
-                    self.requestForegroundApp()
-                    self.requestSoundOutput()
-                    if !self.pendingConnectionActions.isEmpty {
-                        self.runPendingConnectionActions()
+            guard let self else { return }
+            self.isConnecting = false
+            switch result {
+            case .success(let clientKey):
+                let saved = clientKey.isEmpty || self.settings.saveClientKey(clientKey)
+                guard self.webOSClient.isConnected else {
+                    self.logger.log("connection", "registration completed after transport closed tokenSaved=\(saved)")
+                    if !saved {
+                        self.status = self.text(.pairingTokenSaveFailed)
+                        self.failPendingConnectionActions()
+                        return
                     }
-                case .failure(let message):
-                    self.logger.log("connection", "connect failed: \(message)")
-                    self.failPendingConnectionActions()
-                    self.selectedHDMIIndex = nil
-                    self.status = message
-                    if message == self.text(.certificateChanged) || message == self.text(.certificateSaveFailed) {
-                        self.maintainConnection = false
-                    } else if !showPairingPrompt {
-                        self.scheduleReconnect()
-                    }
+                    self.handleConnectionStateChanged(false)
+                    return
+                }
+                self.cancelReconnect()
+                self.reconnectAttempt = 0
+                self.status = saved
+                    ? "\(self.text(.connected)) \(self.settings.tvName)"
+                    : self.text(.pairingTokenSaveFailed)
+                self.logger.log("connection", "connected tokenSaved=\(saved)")
+                self.startStateSubscriptions()
+                self.requestVolume()
+                self.requestExternalInputs()
+                self.requestForegroundApp()
+                self.requestSoundOutput()
+                if !self.pendingConnectionActions.isEmpty {
+                    self.runPendingConnectionActions()
+                }
+            case .failure(let message):
+                self.logger.log("connection", "connect failed: \(message)")
+                self.failPendingConnectionActions()
+                self.selectedHDMIIndex = nil
+                self.status = message
+                if message == self.text(.certificateChanged) || message == self.text(.certificateSaveFailed) {
+                    self.maintainConnection = false
+                } else if !showPairingPrompt {
+                    self.scheduleReconnect()
                 }
             }
         }
@@ -633,14 +643,22 @@ final class AppCoordinator: ObservableObject {
     func changeSoundOutput(_ outputID: String) {
         ensureConnectedThen { [weak self] in
             guard let self else { return }
+            self.soundOutputCommandGeneration += 1
+            let generation = self.soundOutputCommandGeneration
+            self.pendingSoundOutputID = outputID
             self.webOSClient.changeSoundOutput(outputID) { result in
                 DispatchQueue.main.async {
+                    guard self.soundOutputCommandGeneration == generation else { return }
                     switch result {
                     case .success:
                         self.currentSoundOutputID = outputID
                         self.soundOutputAvailable = true
                         self.unsupportedSoundOutputIDs.remove(outputID)
+                        self.scheduleSoundOutputConfirmationExpiry(generation: generation)
                     case .failure(let message):
+                        self.soundOutputConfirmationWorkItem?.cancel()
+                        self.soundOutputConfirmationWorkItem = nil
+                        self.pendingSoundOutputID = nil
                         if self.isUnsupportedSoundOutputError(message) {
                             self.unsupportedSoundOutputIDs.insert(outputID)
                         }
@@ -716,6 +734,12 @@ final class AppCoordinator: ObservableObject {
     private func handleSoundOutputResult(_ result: LGResult<String>) {
         switch result {
         case .success(let outputID):
+            guard Self.shouldAcceptSoundOutputSubscription(
+                reported: outputID,
+                pending: pendingSoundOutputID
+            ) else {
+                return
+            }
             soundOutputAvailable = true
             currentSoundOutputID = outputID
             unsupportedSoundOutputIDs.remove(outputID)
@@ -724,6 +748,21 @@ final class AppCoordinator: ObservableObject {
                 soundOutputAvailable = false
             }
         }
+    }
+
+    static func shouldAcceptSoundOutputSubscription(reported: String, pending: String?) -> Bool {
+        pending == nil || pending == reported
+    }
+
+    private func scheduleSoundOutputConfirmationExpiry(generation: Int) {
+        soundOutputConfirmationWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.soundOutputCommandGeneration == generation else { return }
+            self.soundOutputConfirmationWorkItem = nil
+            self.pendingSoundOutputID = nil
+        }
+        soundOutputConfirmationWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: workItem)
     }
 
     private func isUnsupportedSoundOutputError(_ message: String) -> Bool {
@@ -769,6 +808,10 @@ final class AppCoordinator: ObservableObject {
         volumeCommandInFlight = false
         activeVolumeCommandGeneration = nil
         muteCommandGeneration += 1
+        soundOutputCommandGeneration += 1
+        soundOutputConfirmationWorkItem?.cancel()
+        soundOutputConfirmationWorkItem = nil
+        pendingSoundOutputID = nil
         hdmiSwitchCooldownWorkItem?.cancel()
         hdmiSwitchCooldownWorkItem = nil
         hdmiCommandGeneration += 1

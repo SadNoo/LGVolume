@@ -1,6 +1,6 @@
 import AppKit
 
-final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
+final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     private enum SettingsPage: CaseIterable {
         case general
         case preferences
@@ -45,13 +45,28 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
                 return .shortcutsSubtitle
             }
         }
+
+        var systemImageName: String {
+            switch self {
+            case .general:
+                return "gearshape"
+            case .preferences:
+                return "switch.2"
+            case .hdmi:
+                return "display.2"
+            case .shortcuts:
+                return "command"
+            }
+        }
     }
 
     private let settings: AppSettings
     private weak var coordinator: AppCoordinator?
 
     private var selectedPage: SettingsPage = .general
-    private let pageControl = NSSegmentedControl(labels: ["", "", "", ""], trackingMode: .selectOne, target: nil, action: nil)
+    private let sidebarTable = NSTableView()
+    private let sidebarScrollView = NSScrollView()
+    private let sidebarEffectView = NSVisualEffectView()
     private let pageTitleLabel = NSTextField(labelWithString: "")
     private let pageSubtitleLabel = NSTextField(labelWithString: "")
     private let contentContainer = NSView()
@@ -83,12 +98,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         self.settings = settings
         self.coordinator = coordinator
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 390),
+            contentRect: NSRect(x: 0, y: 0, width: 840, height: 430),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         window.title = "LGVolume \(L10n.text(.settings, languageMode: settings.languageMode))"
+        window.minSize = NSSize(width: 760, height: 390)
         window.center()
         super.init(window: window)
         configureControls()
@@ -124,9 +140,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         window?.title = "LGVolume \(t(.settings))"
         pageSubtitleLabel.stringValue = t(selectedPage.subtitleKey)
 
-        for (offset, page) in SettingsPage.allCases.enumerated() {
-            pageControl.setLabel(t(page.tabKey), forSegment: offset)
-        }
+        sidebarTable.reloadData()
 
         appearanceControl.setLabel(t(.auto), forSegment: 0)
         appearanceControl.setLabel(t(.light), forSegment: 1)
@@ -189,6 +203,66 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         shortcutStateLabel.textColor = shortcutsAvailable ? .secondaryLabelColor : .systemOrange
     }
 
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        SettingsPage.allCases.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard SettingsPage.allCases.indices.contains(row) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("settings.sidebar.cell")
+        let cell: NSTableCellView
+        if let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView {
+            cell = reused
+        } else {
+            cell = NSTableCellView()
+            cell.identifier = identifier
+
+            let imageView = NSImageView()
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            cell.imageView = imageView
+            cell.addSubview(imageView)
+
+            let textField = NSTextField(labelWithString: "")
+            textField.translatesAutoresizingMaskIntoConstraints = false
+            textField.font = .systemFont(ofSize: 13, weight: .medium)
+            textField.lineBreakMode = .byTruncatingTail
+            cell.textField = textField
+            cell.addSubview(textField)
+
+            NSLayoutConstraint.activate([
+                imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 9),
+                imageView.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                imageView.widthAnchor.constraint(equalToConstant: 18),
+                imageView.heightAnchor.constraint(equalToConstant: 18),
+                textField.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 8),
+                textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+                textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            ])
+        }
+
+        let page = SettingsPage.allCases[row]
+        cell.imageView?.image = NSImage(systemSymbolName: page.systemImageName, accessibilityDescription: t(page.tabKey))
+        cell.textField?.stringValue = t(page.tabKey)
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        let row = sidebarTable.selectedRow
+        guard SettingsPage.allCases.indices.contains(row) else { return }
+        let page = SettingsPage.allCases[row]
+        guard selectedPage != page else { return }
+        selectedPage = page
+        renderCurrentPage()
+    }
+
+    func selectPage(_ index: Int) {
+        guard SettingsPage.allCases.indices.contains(index) else { return }
+        selectedPage = SettingsPage.allCases[index]
+        updatePageSelection()
+        renderCurrentPage()
+    }
+
     func controlTextDidChange(_ obj: Notification) {
         if obj.object as? NSTextField === ipField {
             updateIPFeedback()
@@ -233,13 +307,27 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             field.heightAnchor.constraint(equalToConstant: Self.formControlHeight).isActive = true
         }
 
-        pageControl.target = self
-        pageControl.action = #selector(changePage(_:))
-        pageControl.segmentStyle = .rounded
-        pageControl.controlSize = .small
-        pageControl.font = .systemFont(ofSize: 12, weight: .medium)
-        pageControl.selectedSegment = 0
-        pageControl.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        sidebarTable.identifier = NSUserInterfaceItemIdentifier("settings.sidebar")
+        sidebarTable.headerView = nil
+        sidebarTable.backgroundColor = .clear
+        sidebarTable.style = .sourceList
+        sidebarTable.allowsEmptySelection = false
+        sidebarTable.rowHeight = 36
+        sidebarTable.intercellSpacing = NSSize(width: 0, height: 2)
+        sidebarTable.dataSource = self
+        sidebarTable.delegate = self
+        let sidebarColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("settings.sidebar.column"))
+        sidebarColumn.resizingMask = .autoresizingMask
+        sidebarTable.addTableColumn(sidebarColumn)
+
+        sidebarScrollView.documentView = sidebarTable
+        sidebarScrollView.drawsBackground = false
+        sidebarScrollView.hasVerticalScroller = false
+        sidebarScrollView.hasHorizontalScroller = false
+
+        sidebarEffectView.material = .sidebar
+        sidebarEffectView.blendingMode = .behindWindow
+        sidebarEffectView.state = .active
 
         appearanceControl.target = self
         appearanceControl.action = #selector(changeAppearance)
@@ -278,6 +366,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private func buildUI() {
         guard let contentView = window?.contentView else { return }
 
+        sidebarEffectView.translatesAutoresizingMaskIntoConstraints = false
+        sidebarScrollView.translatesAutoresizingMaskIntoConstraints = false
+        sidebarEffectView.addSubview(sidebarScrollView)
+        contentView.addSubview(sidebarEffectView)
+
         let root = NSStackView()
         root.orientation = .vertical
         root.alignment = .leading
@@ -287,7 +380,17 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         contentView.addSubview(root)
 
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            sidebarEffectView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            sidebarEffectView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            sidebarEffectView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            sidebarEffectView.widthAnchor.constraint(equalToConstant: Self.sidebarWidth),
+
+            sidebarScrollView.leadingAnchor.constraint(equalTo: sidebarEffectView.leadingAnchor, constant: 8),
+            sidebarScrollView.trailingAnchor.constraint(equalTo: sidebarEffectView.trailingAnchor, constant: -8),
+            sidebarScrollView.topAnchor.constraint(equalTo: sidebarEffectView.topAnchor, constant: 12),
+            sidebarScrollView.bottomAnchor.constraint(equalTo: sidebarEffectView.bottomAnchor, constant: -12),
+
+            root.leadingAnchor.constraint(equalTo: sidebarEffectView.trailingAnchor),
             root.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             root.topAnchor.constraint(equalTo: contentView.topAnchor),
             root.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
@@ -296,8 +399,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let header = NSStackView()
         header.orientation = .vertical
         header.alignment = .leading
-        header.spacing = 7
-        header.edgeInsets = NSEdgeInsets(top: 18, left: 32, bottom: 10, right: 32)
+        header.spacing = 4
+        header.edgeInsets = NSEdgeInsets(top: 16, left: 28, bottom: 10, right: 28)
         header.setContentHuggingPriority(.required, for: .vertical)
         pageTitleLabel.font = .systemFont(ofSize: 22, weight: .bold)
         header.addArrangedSubview(pageTitleLabel)
@@ -305,10 +408,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         pageSubtitleLabel.font = .systemFont(ofSize: 13)
         header.addArrangedSubview(pageSubtitleLabel)
 
-        header.addArrangedSubview(pageControl)
         root.addArrangedSubview(header)
         header.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        header.heightAnchor.constraint(equalToConstant: 96).isActive = true
+        header.heightAnchor.constraint(equalToConstant: 72).isActive = true
 
         let separator = separatorLine()
         root.addArrangedSubview(separator)
@@ -325,13 +427,15 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         footerSeparator.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
 
         let footer = row()
-        footer.edgeInsets = NSEdgeInsets(top: 10, left: 32, bottom: 12, right: 32)
+        footer.edgeInsets = NSEdgeInsets(top: 9, left: 28, bottom: 11, right: 28)
         footer.addArrangedSubview(spacer())
         footer.addArrangedSubview(saveButton)
         root.addArrangedSubview(footer)
         footer.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        footer.heightAnchor.constraint(equalToConstant: 54).isActive = true
+        footer.heightAnchor.constraint(equalToConstant: 50).isActive = true
 
+        sidebarTable.reloadData()
+        sidebarTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         refresh()
     }
 
@@ -356,15 +460,18 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         contentContainer.addSubview(pageView)
         pageView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            pageView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 24),
-            pageView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -24),
-            pageView.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 10),
-            pageView.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor, constant: -10)
+            pageView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 26),
+            pageView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -26),
+            pageView.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 16),
+            pageView.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor, constant: -12)
         ])
     }
 
     private func updatePageSelection() {
-        pageControl.selectedSegment = SettingsPage.allCases.firstIndex(of: selectedPage) ?? 0
+        let index = SettingsPage.allCases.firstIndex(of: selectedPage) ?? 0
+        if sidebarTable.selectedRow != index {
+            sidebarTable.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        }
     }
 
     private func generalPage() -> NSView {
@@ -424,7 +531,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         detectedInputNamesLabel.font = .systemFont(ofSize: 12)
         detectedInputNamesLabel.textColor = .secondaryLabelColor
-        detectedInputNamesLabel.lineBreakMode = .byTruncatingTail
+        detectedInputNamesLabel.lineBreakMode = .byTruncatingMiddle
+        detectedInputNamesLabel.toolTip = detectedInputNamesLabel.stringValue
         if detectedInputNamesLabel.constraints.first(where: { $0.firstAttribute == .width }) == nil {
             detectedInputNamesLabel.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
@@ -561,7 +669,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private func pageSeparatorLine() -> NSBox {
         let box = separatorLine()
-        box.widthAnchor.constraint(equalToConstant: 620).isActive = true
+        box.widthAnchor.constraint(equalToConstant: 560).isActive = true
         return box
     }
 
@@ -654,6 +762,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         detectedInputNamesLabel.stringValue = detectedNames.isEmpty
             ? t(.noInputsDetected)
             : "\(t(.detectedInputs)) \(detectedNames.joined(separator: "  ·  "))"
+        detectedInputNamesLabel.toolTip = detectedInputNamesLabel.stringValue
     }
 
     private func volumeString(volume: Int, muted: Bool) -> String {
@@ -682,11 +791,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private func t(_ key: L10n.Key) -> String {
         L10n.text(key, languageMode: settings.languageMode)
-    }
-
-    @objc private func changePage(_ sender: NSSegmentedControl) {
-        selectedPage = SettingsPage.allCases[max(0, min(sender.selectedSegment, SettingsPage.allCases.count - 1))]
-        renderCurrentPage()
     }
 
     @objc private func changeAppearance() {
@@ -769,4 +873,5 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private static let formRowHeight: CGFloat = 30
     private static let secondaryRowHeight: CGFloat = 20
     private static let formControlHeight: CGFloat = 28
+    private static let sidebarWidth: CGFloat = 176
 }

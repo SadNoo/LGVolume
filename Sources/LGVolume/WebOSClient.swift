@@ -111,6 +111,7 @@ final class WebOSClient: NSObject {
 
         let id = makeID()
         var payload = WebOSRegistration.payload(forcePairing: forcePairing)
+        var receivedPairingPrompt = false
         if !clientKey.isEmpty && !forcePairing {
             payload["client-key"] = clientKey
         }
@@ -141,6 +142,7 @@ final class WebOSClient: NSObject {
                 return true
             }
             if self.isPairingPromptResponse(type: type, payload: payload) {
+                receivedPairingPrompt = true
                 self.scheduleTimeout(after: 90) { [weak self] in
                     guard let self, !self.completionCalled else { return }
                     self.finishConnection(.failure(self.t(.pairingTimeout)), completion: completion)
@@ -156,19 +158,25 @@ final class WebOSClient: NSObject {
             "payload": payload
         ]) { [weak self] in
             guard let self, !self.completionCalled else { return }
-            if forcePairing {
-                self.finishConnection(.failure(self.t(.sendFailed)), completion: completion)
-            } else {
+            if Self.shouldRetryConnectionAttempt(
+                forcePairing: forcePairing,
+                receivedPairingPrompt: receivedPairingPrompt
+            ) {
                 self.retryConnectionAttempt()
+            } else {
+                self.finishConnection(.failure(self.t(.sendFailed)), completion: completion)
             }
         }
 
-        scheduleTimeout(after: forcePairing ? 90 : 8) { [weak self] in
+        scheduleTimeout(after: 8) { [weak self] in
             guard let self, !self.completionCalled else { return }
-            if forcePairing {
-                self.finishConnection(.failure(self.t(.pairingTimeout)), completion: completion)
-            } else {
+            if Self.shouldRetryConnectionAttempt(
+                forcePairing: forcePairing,
+                receivedPairingPrompt: receivedPairingPrompt
+            ) {
                 self.retryConnectionAttempt()
+            } else {
+                self.finishConnection(.failure(self.t(.pairingTimeout)), completion: completion)
             }
         }
     }
@@ -568,6 +576,13 @@ final class WebOSClient: NSObject {
         isConnected: Bool
     ) -> Bool {
         isConnected && response["_localFailure"] as? Bool != true
+    }
+
+    nonisolated static func shouldRetryConnectionAttempt(
+        forcePairing: Bool,
+        receivedPairingPrompt: Bool
+    ) -> Bool {
+        !forcePairing || !receivedPairingPrompt
     }
 
     nonisolated static func hdmiIndex(in value: String) -> Int? {

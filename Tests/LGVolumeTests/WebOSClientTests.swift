@@ -73,4 +73,14 @@ final class WebOSClientTests: XCTestCase {
         XCTAssertFalse(WebOSClient.shouldAttemptHDMILaunchFallback(response: localError, isConnected: true))
         XCTAssertFalse(WebOSClient.shouldAttemptHDMILaunchFallback(response: serverError, isConnected: false))
     }
+
+    func testPairingRetriesFallbackBeforePromptAppears() {
+        XCTAssertTrue(WebOSClient.shouldRetryConnectionAttempt(forcePairing: true, receivedPairingPrompt: false))
+        XCTAssertTrue(WebOSClient.shouldRetryConnectionAttempt(forcePairing: false, receivedPairingPrompt: false))
+    }
+
+    func testPairingWaitsOnCurrentTransportAfterPromptAppears() {
+        XCTAssertFalse(WebOSClient.shouldRetryConnectionAttempt(forcePairing: true, receivedPairingPrompt: true))
+        XCTAssertTrue(WebOSClient.shouldRetryConnectionAttempt(forcePairing: false, receivedPairingPrompt: true))
+    }
 }

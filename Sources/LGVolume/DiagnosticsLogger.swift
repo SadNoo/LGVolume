@@ -6,8 +6,10 @@ final class DiagnosticsLogger: @unchecked Sendable {
 
     private let directoryURL: URL
     private let fileManager: FileManager
-    private let lock = NSLock()
     private let maximumBytes: UInt64
+    private let queue = DispatchQueue(label: "local.codex.lgvolume.diagnostics", qos: .utility)
+    private let queueKey = DispatchSpecificKey<Void>()
+    private let timestampFormatter = ISO8601DateFormatter()
 
     init(
         directoryURL: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -18,6 +20,7 @@ final class DiagnosticsLogger: @unchecked Sendable {
         self.directoryURL = directoryURL
         self.fileManager = fileManager
         self.maximumBytes = maximumBytes
+        queue.setSpecific(key: queueKey, value: ())
     }
 
     var logURL: URL {
@@ -25,11 +28,20 @@ final class DiagnosticsLogger: @unchecked Sendable {
     }
 
     func log(_ category: String, _ message: String) {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let line = "\(timestamp) [\(sanitize(category))] \(sanitize(message))\n"
+        let date = Date()
+        queue.async { [self] in
+            let timestamp = timestampFormatter.string(from: date)
+            let line = "\(timestamp) [\(sanitize(category))] \(sanitize(message))\n"
+            write(line)
+        }
+    }
 
-        lock.lock()
-        defer { lock.unlock() }
+    func flush() {
+        guard DispatchQueue.getSpecific(key: queueKey) == nil else { return }
+        queue.sync {}
+    }
+
+    private func write(_ line: String) {
         do {
             try prepareDirectory()
             try rotateIfNeeded(adding: UInt64(line.utf8.count))
@@ -49,6 +61,7 @@ final class DiagnosticsLogger: @unchecked Sendable {
     @MainActor
     func reveal() {
         log("diagnostics", "Log revealed by user")
+        flush()
         NSWorkspace.shared.activateFileViewerSelecting([logURL])
     }
 

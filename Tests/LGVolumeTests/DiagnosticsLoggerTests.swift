@@ -20,6 +20,7 @@ final class DiagnosticsLoggerTests: XCTestCase {
         let logger = DiagnosticsLogger(directoryURL: directory, maximumBytes: 1024)
 
         logger.log("network", "connected to 192.168.1.44")
+        logger.flush()
 
         let text = try String(contentsOf: logger.logURL, encoding: .utf8)
         XCTAssertFalse(text.contains("192.168.1.44"))

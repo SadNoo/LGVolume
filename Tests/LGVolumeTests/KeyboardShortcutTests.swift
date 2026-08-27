@@ -3,6 +3,16 @@ import XCTest
 @testable import LGVolume
 
 final class KeyboardShortcutTests: XCTestCase {
+    func testCombinedRegistrationStatusIncludesVolumeAndHDMIHotKeys() {
+        XCTAssertEqual(
+            KeyboardVolumeMonitor.combinedRegistrationStates(
+                volume: [true, false, true],
+                hdmi: [true, true, false, true]
+            ),
+            [true, false, true, true, true, false, true]
+        )
+    }
+
     func testDefaultHDMIShortcutsAreDistinctAndRoundTrip() throws {
         let shortcuts = try (1...4).map { index in
             try XCTUnwrap(KeyboardShortcut.defaultHDMIShortcut(index: index))

@@ -12,6 +12,8 @@ final class KeyboardVolumeMonitor: @unchecked Sendable {
     private var localMonitor: Any?
     private var hotKeyRefs: [EventHotKeyRef?] = []
     private var volumeHotKeyRefs: [EventHotKeyRef] = []
+    private var volumeRegistrationStates = Array(repeating: false, count: 3)
+    private var hdmiRegistrationStates = Array(repeating: false, count: 4)
     private var eventHandlerRef: EventHandlerRef?
     private var activeHDMIShortcuts: [KeyboardShortcut?] = []
     private var lastHDMITriggerTime = Date.distantPast
@@ -61,7 +63,7 @@ final class KeyboardVolumeMonitor: @unchecked Sendable {
         hotKeyRefs = Array(repeating: nil, count: activeHDMIShortcuts.count)
 
         for (offset, shortcut) in activeHDMIShortcuts.enumerated() {
-            guard let shortcut else {
+            guard let shortcut, eventHandlerRef != nil else {
                 continue
             }
 
@@ -80,12 +82,10 @@ final class KeyboardVolumeMonitor: @unchecked Sendable {
             }
         }
 
-        let states = activeHDMIShortcuts.enumerated().map { offset, shortcut in
+        hdmiRegistrationStates = activeHDMIShortcuts.enumerated().map { offset, shortcut in
             shortcut == nil || hotKeyRefs[offset] != nil
         }
-        Task { @MainActor in
-            onShortcutRegistrationChanged(states)
-        }
+        reportShortcutRegistrationStates()
     }
 
     deinit {
@@ -109,7 +109,7 @@ final class KeyboardVolumeMonitor: @unchecked Sendable {
 
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let selfPointer = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(
+        let status = InstallEventHandler(
             GetApplicationEventTarget(),
             { _, event, userData in
                 guard let event, let userData else {
@@ -141,6 +141,9 @@ final class KeyboardVolumeMonitor: @unchecked Sendable {
             selfPointer,
             &eventHandlerRef
         )
+        if status != noErr {
+            eventHandlerRef = nil
+        }
     }
 
     @MainActor
@@ -270,20 +273,41 @@ final class KeyboardVolumeMonitor: @unchecked Sendable {
 
     private func registerVolumeHotKeys() {
         unregisterVolumeHotKeys()
+        volumeRegistrationStates.removeAll(keepingCapacity: true)
         for (id, keyCode) in [(10, Self.f10KeyCode), (11, Self.f11KeyCode), (12, Self.f12KeyCode)] {
+            guard eventHandlerRef != nil else {
+                volumeRegistrationStates.append(false)
+                continue
+            }
             var hotKeyRef: EventHotKeyRef?
             let hotKeyID = EventHotKeyID(signature: Self.hotKeySignature, id: UInt32(id))
-            if RegisterEventHotKey(
+            let registered = RegisterEventHotKey(
                 UInt32(keyCode),
                 0,
                 hotKeyID,
                 GetApplicationEventTarget(),
                 0,
                 &hotKeyRef
-            ) == noErr, let hotKeyRef {
+            ) == noErr && hotKeyRef != nil
+            volumeRegistrationStates.append(registered)
+            if registered, let hotKeyRef {
                 volumeHotKeyRefs.append(hotKeyRef)
             }
         }
+    }
+
+    private func reportShortcutRegistrationStates() {
+        let states = Self.combinedRegistrationStates(
+            volume: volumeRegistrationStates,
+            hdmi: hdmiRegistrationStates
+        )
+        Task { @MainActor in
+            onShortcutRegistrationChanged(states)
+        }
+    }
+
+    static func combinedRegistrationStates(volume: [Bool], hdmi: [Bool]) -> [Bool] {
+        volume + hdmi
     }
 
     private func unregisterVolumeHotKeys() {
