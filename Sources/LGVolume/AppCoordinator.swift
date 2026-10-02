@@ -152,7 +152,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     func start() {
-        settings.launchAtLogin = launchAtLogin
+        restoreLaunchAtLoginIfNeeded()
         applyAppearance()
         syncMenuState()
         keyboardVolumeMonitor.start()
@@ -182,9 +182,21 @@ final class AppCoordinator: ObservableObject {
         closeMenuPanel?()
         keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
         let controller = getSettingsWindowController()
+        NSApp.activate()
         controller.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        controller.window?.makeKeyAndOrderFront(nil)
         controller.refresh()
+    }
+
+    var isSettingsWindowVisible: Bool {
+        settingsWindowController?.window?.isVisible == true
+    }
+
+    /// Keeps the Settings window in front of other apps while the menu panel is used.
+    func bringSettingsWindowForward() {
+        guard let window = settingsWindowController?.window, window.isVisible else { return }
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
     }
 
     func quit() {
@@ -351,6 +363,19 @@ final class AppCoordinator: ObservableObject {
         }
         settings.launchAtLogin = launchAtLogin
         settingsWindowController?.refresh()
+    }
+
+    /// An ad-hoc signed rebuild looks like a new app to Background Task Management, so the
+    /// registration disappears after every update. Keep the user's choice and register again;
+    /// `.requiresApproval` (switched off in System Settings) is left for the user to decide.
+    private func restoreLaunchAtLoginIfNeeded() {
+        guard settings.launchAtLogin, SMAppService.mainApp.status == .notRegistered else { return }
+        do {
+            try SMAppService.mainApp.register()
+            logger.log("launch", "re-registered launch at login")
+        } catch {
+            logger.log("launch", "re-register failed: \(error.localizedDescription)")
+        }
     }
 
     func refreshVolume() {

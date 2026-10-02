@@ -25,7 +25,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             case .general:
                 return .general
             case .preferences:
-                return .misc
+                return .preferences
             case .hdmi:
                 return .hdmi
             case .shortcuts:
@@ -100,6 +100,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private var renderedLanguageMode: String?
     private var hasLoadedEditableValues = false
     private var saveFeedbackWorkItem: DispatchWorkItem?
+    private var isReloadingSidebar = false
 
     init(settings: AppSettings, coordinator: AppCoordinator) {
         self.settings = settings
@@ -149,7 +150,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         window?.title = "LGVolume \(t(.settings))"
         pageSubtitleLabel.stringValue = t(selectedPage.subtitleKey)
 
+        isReloadingSidebar = true
         sidebarTable.reloadData()
+        isReloadingSidebar = false
 
         appearanceControl.setLabel(t(.auto), forSegment: 0)
         appearanceControl.setLabel(t(.light), forSegment: 1)
@@ -264,16 +267,23 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        // reloadData() (for a language change) can reset the selection to the first row.
+        guard !isReloadingSidebar else { return }
         let row = sidebarTable.selectedRow
         guard SettingsPage.allCases.indices.contains(row) else { return }
         let page = SettingsPage.allCases[row]
         guard selectedPage != page else { return }
+        DiagnosticsLogger.shared.log(
+            "settings",
+            "sidebar page \(selectedPage) -> \(page) event=\(NSApp.currentEvent.map { String(describing: $0.type) } ?? "none")"
+        )
         selectedPage = page
         renderCurrentPage()
     }
 
     func selectPage(_ index: Int) {
         guard SettingsPage.allCases.indices.contains(index) else { return }
+        DiagnosticsLogger.shared.log("settings", "select page \(index) from \(selectedPage)")
         selectedPage = SettingsPage.allCases[index]
         updatePageSelection()
         renderCurrentPage()

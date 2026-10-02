@@ -15,6 +15,7 @@ final class StatusItemController: NSObject, NSWindowDelegate {
     private let hostingView: NSHostingView<MenuPanelRoot>
     private var changeSubscription: AnyCancellable?
     private var lastClosed = Date.distantPast
+    private var settingsWasOpen = false
 
     init(coordinator: AppCoordinator) {
         self.coordinator = coordinator
@@ -33,6 +34,7 @@ final class StatusItemController: NSObject, NSWindowDelegate {
         panel.contentView = background
         panel.delegate = self
         panel.onCancel = { [weak self] in self?.closePanel() }
+        panel.onShowSettings = { [weak self] in self?.coordinator.showSettings() }
 
         if let button = statusItem.button {
             button.target = self
@@ -65,6 +67,12 @@ final class StatusItemController: NSObject, NSWindowDelegate {
     private func showPanel() {
         coordinator.refreshTVState()
         layoutPanel()
+        // Clicking a menu bar item can hand activation back to the previous app, which would
+        // drop an open Settings window behind it. Keep this app active while Settings is open.
+        settingsWasOpen = coordinator.isSettingsWindowVisible
+        if settingsWasOpen {
+            NSApp.activate()
+        }
         panel.makeKeyAndOrderFront(nil)
         statusItem.button?.highlight(true)
     }
@@ -74,6 +82,11 @@ final class StatusItemController: NSObject, NSWindowDelegate {
         panel.orderOut(nil)
         statusItem.button?.highlight(false)
         lastClosed = Date()
+        // Hand focus back to Settings unless the user moved on to another app.
+        if settingsWasOpen && NSApp.isActive {
+            coordinator.bringSettingsWindowForward()
+        }
+        settingsWasOpen = false
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -130,6 +143,7 @@ final class StatusItemController: NSObject, NSWindowDelegate {
 /// the app, like a menu.
 final class MenuPanelWindow: NSPanel {
     var onCancel: (() -> Void)?
+    var onShowSettings: (() -> Void)?
 
     init() {
         super.init(
@@ -154,6 +168,16 @@ final class MenuPanelWindow: NSPanel {
 
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
+    }
+
+    /// ⌘, is claimed by the app menu's Settings item before SwiftUI sees it, so handle it here.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        if modifiers == .command, event.charactersIgnoringModifiers == "," {
+            onShowSettings?()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 
