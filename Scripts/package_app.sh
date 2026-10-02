@@ -11,12 +11,22 @@ CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
-swift build -c "$BUILD_CONFIGURATION" --arch arm64 -Xswiftc -Osize
+BUILD_FLAGS=(-c "$BUILD_CONFIGURATION" --arch arm64 -Xswiftc -Osize)
+swift build "${BUILD_FLAGS[@]}"
+# Ask SwiftPM where it put the product: the directory layout differs between toolchains
+# (.build/arm64-apple-macosx/release vs .build/out/Products/Release), and copying from a
+# hard-coded path silently packaged a stale binary.
+BIN_PATH="$(swift build "${BUILD_FLAGS[@]}" --show-bin-path)"
+BUILT_BINARY="$BIN_PATH/$APP_NAME"
+if [[ ! -x "$BUILT_BINARY" ]]; then
+  echo "Built binary not found at $BUILT_BINARY" >&2
+  exit 1
+fi
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-cp ".build/arm64-apple-macosx/$BUILD_CONFIGURATION/$APP_NAME" "$MACOS_DIR/$APP_NAME"
+cp "$BUILT_BINARY" "$MACOS_DIR/$APP_NAME"
 cp "Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS_DIR/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$CONTENTS_DIR/Info.plist"
