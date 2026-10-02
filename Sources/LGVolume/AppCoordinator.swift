@@ -344,37 +344,78 @@ final class AppCoordinator: ObservableObject {
         settingsWindowController?.refresh()
     }
 
+    /// Set when turning on launch at login did not take effect; Settings shows it with a way
+    /// to open the Login Items pane.
+    private(set) var launchAtLoginProblem: String?
+
     func setLaunchAtLogin(_ enabled: Bool) {
+        let service = SMAppService.mainApp
+        logger.log("launch", "set enabled=\(enabled) status=\(Self.describe(service.status))")
+        settings.launchAtLogin = enabled
+        launchAtLoginProblem = nil
+        var failure: Error?
         do {
             if enabled {
-                if SMAppService.mainApp.status == .notRegistered {
-                    try SMAppService.mainApp.register()
+                if service.status != .enabled {
+                    try service.register()
                 }
-                status = launchAtLoginRequiresApproval ? text(.launchRequiresApproval) : text(.saveSuccess)
-            } else {
-                if SMAppService.mainApp.status != .notRegistered {
-                    try SMAppService.mainApp.unregister()
-                }
-                status = text(.saveSuccess)
+            } else if service.status == .enabled || service.status == .requiresApproval {
+                try service.unregister()
             }
         } catch {
-            settings.launchAtLogin = SMAppService.mainApp.status == .enabled
-            showError("\(text(.launch)) \(error.localizedDescription)")
+            logger.log("launch", "\(enabled ? "register" : "unregister") failed: \(error)")
+            failure = error
+            if enabled {
+                // A record left by an earlier build can block registration; clear it and retry.
+                try? service.unregister()
+                do {
+                    try service.register()
+                    failure = nil
+                } catch {
+                    logger.log("launch", "retry register failed: \(error)")
+                    failure = error
+                }
+            }
         }
-        settings.launchAtLogin = launchAtLogin
+        logger.log("launch", "status after=\(Self.describe(service.status))")
+
+        if let failure {
+            launchAtLoginProblem = "\(text(.launch)) \(failure.localizedDescription)"
+            showError(launchAtLoginProblem ?? "")
+        } else if enabled && service.status == .requiresApproval {
+            launchAtLoginProblem = text(.launchRequiresApproval)
+            showError(text(.launchRequiresApproval))
+        } else {
+            status = text(.saveSuccess)
+        }
         settingsWindowController?.refresh()
+    }
+
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
+    }
+
+    private static func describe(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .notRegistered: return "notRegistered"
+        case .enabled: return "enabled"
+        case .requiresApproval: return "requiresApproval"
+        case .notFound: return "notFound"
+        @unknown default: return "unknown(\(status.rawValue))"
+        }
     }
 
     /// An ad-hoc signed rebuild looks like a new app to Background Task Management, so the
     /// registration disappears after every update. Keep the user's choice and register again;
     /// `.requiresApproval` (switched off in System Settings) is left for the user to decide.
     private func restoreLaunchAtLoginIfNeeded() {
-        guard settings.launchAtLogin, SMAppService.mainApp.status == .notRegistered else { return }
+        let status = SMAppService.mainApp.status
+        guard settings.launchAtLogin, status != .enabled, status != .requiresApproval else { return }
         do {
             try SMAppService.mainApp.register()
-            logger.log("launch", "re-registered launch at login")
+            logger.log("launch", "re-registered launch at login (was \(Self.describe(status)))")
         } catch {
-            logger.log("launch", "re-register failed: \(error.localizedDescription)")
+            logger.log("launch", "re-register failed (was \(Self.describe(status))): \(error)")
         }
     }
 

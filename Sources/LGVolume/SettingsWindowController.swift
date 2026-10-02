@@ -127,7 +127,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         if !hasLoadedEditableValues {
             loadEditableValues()
         }
-        launchAtLoginButton.state = coordinator?.launchAtLogin == true ? .on : .off
+        launchAtLoginButton.state = coordinator?.launchAtLogin == true || coordinator?.launchAtLoginRequiresApproval == true
+            ? .on : .off
         launchAtLoginButton.toolTip = coordinator?.launchAtLoginRequiresApproval == true ? t(.launchRequiresApproval) : nil
         secureConnectionButton.state = settings.secureConnectionOnly ? .on : .off
         useTVInputNamesButton.state = settings.useTVInputNames ? .on : .off
@@ -940,6 +941,21 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
 
     @objc private func changeLaunchAtLogin() {
         coordinator?.setLaunchAtLogin(launchAtLoginButton.state == .on)
+        guard let problem = coordinator?.launchAtLoginProblem, let window else {
+            showSaveFeedback()
+            return
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = t(.launchAtLogin)
+        alert.informativeText = problem
+        alert.addButton(withTitle: t(.openLoginItems))
+        alert.addButton(withTitle: t(.ok))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            if response == .alertFirstButtonReturn {
+                self?.coordinator?.openLoginItemsSettings()
+            }
+        }
     }
 
     @objc private func save() {

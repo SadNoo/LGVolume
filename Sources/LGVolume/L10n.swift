@@ -98,6 +98,8 @@ enum L10n {
         case sleepTVWithMac
         case sleepTVWithMacHelp
         case powerPermissionNeedsRepair
+        case openLoginItems
+        case ok
         case menuStyle
         case menuStyleCards
         case menuStyleNative
@@ -264,6 +266,8 @@ enum L10n {
         .needsRepairShort: "需重新配对",
         .connecting: "正在连接…",
         .notConnectedTV: "未连接到电视",
+        .openLoginItems: "打开“登录项”设置",
+        .ok: "好",
     ]
 
     private static let english: [Key: String] = [
@@ -380,6 +384,8 @@ enum L10n {
         .needsRepairShort: "Re-pair needed",
         .connecting: "Connecting…",
         .notConnectedTV: "Not connected to the TV",
+        .openLoginItems: "Open Login Items",
+        .ok: "OK",
     ]
 
     private static let japanese: [Key: String] = [
@@ -496,5 +502,7 @@ enum L10n {
         .needsRepairShort: "再ペアリングが必要",
         .connecting: "接続中…",
         .notConnectedTV: "テレビに接続されていません",
+        .openLoginItems: "“ログイン項目”を開く",
+        .ok: "OK",
     ]
 }
