@@ -4,6 +4,8 @@ Binary installers are published through GitHub Releases rather than committed to
 
 | Version | Summary |
 | --- | --- |
+| 1.1.0 | Mac sleep puts the TV in standby only while it shows the Mac's HDMI input (detected from the EDID), six switchable menu panel styles, AppKit status item, native-step keyboard volume, review fixes, and a packaging fix that ensures the freshly built binary is shipped. |
+| 1.0.0 | UI and stability baseline (not published as a release). |
 | 0.2.0 | Verified volume commands, real-time state subscriptions, dynamic inputs and audio outputs, owner-only token storage, diagnostics, and release automation. |
 | 0.1.6 | Settings and menu-bar refinements. |
 | 0.1.0–0.1.5 | Initial webOS volume, mute, HDMI, shortcuts, localization, and packaging work. |
