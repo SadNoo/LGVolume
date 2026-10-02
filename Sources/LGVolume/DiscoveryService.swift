@@ -165,25 +165,21 @@ final class DiscoveryService {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 1.5
         configuration.timeoutIntervalForResource = 2
-        let session = URLSession(configuration: configuration)
+        // Talk to the TV directly: never through a configured proxy.
+        configuration.connectionProxyDictionary = [:]
         let semaphore = DispatchSemaphore(value: 0)
-        let responseBox = HTTPResponseDataBox()
-        let task = session.dataTask(with: url) { data, response, _ in
-            if let http = response as? HTTPURLResponse,
-               (200..<300).contains(http.statusCode),
-               let data,
-               data.count <= 256 * 1024 {
-                responseBox.store(data)
-            }
+        let loader = DeviceDescriptionLoader(maximumBytes: Self.maximumDescriptionBytes) {
             semaphore.signal()
         }
-        task.resume()
+        let session = URLSession(configuration: configuration, delegate: loader, delegateQueue: nil)
+        session.dataTask(with: url).resume()
         _ = semaphore.wait(timeout: .now() + 2)
-        task.cancel()
         session.invalidateAndCancel()
-        guard let responseData = responseBox.value else { return nil }
+        guard let responseData = loader.result else { return nil }
         return Self.parseFriendlyName(responseData)
     }
+
+    static let maximumDescriptionBytes = 256 * 1024
 
     static func parseFriendlyName(_ data: Data) -> String? {
         let delegate = FriendlyNameXMLDelegate()
@@ -202,19 +198,74 @@ final class DiscoveryService {
     }
 }
 
-private final class HTTPResponseDataBox: @unchecked Sendable {
+/// Loads a UPnP device description without following redirects (a LAN device must not be able
+/// to send the app to another host) and stops reading once the size limit is exceeded.
+final class DeviceDescriptionLoader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
-    private var storedValue: Data?
+    private let maximumBytes: Int
+    private let finished: () -> Void
+    private var data = Data()
+    private var failed = false
+    private var completed = false
 
-    var value: Data? {
-        lock.lock()
-        defer { lock.unlock() }
-        return storedValue
+    init(maximumBytes: Int, finished: @escaping () -> Void) {
+        self.maximumBytes = maximumBytes
+        self.finished = finished
     }
 
-    func store(_ data: Data) {
+    var result: Data? {
         lock.lock()
-        storedValue = data
+        defer { lock.unlock() }
+        return completed && !failed ? data : nil
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        markFailed()
+        completionHandler(nil)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              http.expectedContentLength <= Int64(maximumBytes) else {
+            markFailed()
+            completionHandler(.cancel)
+            return
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+        lock.lock()
+        data.append(chunk)
+        let tooLarge = data.count > maximumBytes
+        if tooLarge { failed = true }
+        lock.unlock()
+        if tooLarge { dataTask.cancel() }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        if error != nil { failed = true }
+        completed = true
+        lock.unlock()
+        finished()
+    }
+
+    private func markFailed() {
+        lock.lock()
+        failed = true
         lock.unlock()
     }
 }

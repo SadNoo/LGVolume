@@ -35,14 +35,26 @@ final class AppCoordinator: ObservableObject {
         logger: logger,
         verificationFailure: { [weak self] in self?.text(.volumeNotApplied) ?? "Volume was not applied." }
     )
+    private lazy var systemSleepMonitor = SystemSleepMonitor(
+        onWillSleep: { [weak self] done in
+            guard let self else { return done() }
+            self.handleSystemWillSleep(done: done)
+        },
+        onDidWake: { [weak self] in
+            self?.handleSystemDidWake()
+        }
+    )
+    private var screenParametersObserver: NSObjectProtocol?
     @Published private(set) var isConnecting = false
     private var pendingConnectionActions: [PendingConnectionAction] = []
-    private var pendingVolumeTarget: Int?
-    private var activeVolumeTarget: Int?
+    private var pendingVolumeWork: VolumeWork?
     private var volumeCommandInFlight = false
     private var volumeCommandGeneration = 0
     private var activeVolumeCommandGeneration: Int?
     private var muteCommandGeneration = 0
+    private var muteTargetInFlight: Bool?
+    private var muteReadInFlight = false
+    private var queuedMuteToggles = 0
     private var hdmiCommandGeneration = 0
     private var soundOutputCommandGeneration = 0
     private var pendingSoundOutputID: String?
@@ -57,6 +69,13 @@ final class AppCoordinator: ObservableObject {
 
     @Published private(set) var status = "" {
         didSet {
+            statusIsError = false
+            settingsWindowController?.updateStatus()
+        }
+    }
+    /// True while `status` describes a failure the user should see and act on.
+    @Published private(set) var statusIsError = false {
+        didSet {
             settingsWindowController?.updateStatus()
         }
     }
@@ -70,6 +89,8 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var currentSoundOutputID = ""
     @Published private(set) var soundOutputAvailable = false
     @Published private(set) var menuLanguageMode = "auto"
+    /// The HDMI input read from the TV's EDID right now; nil while no LG TV EDID is visible.
+    @Published private(set) var detectedMacHDMIPort: Int?
     @Published private(set) var shortcutRegistrationStates = Array(repeating: true, count: 7) {
         didSet { settingsWindowController?.updateShortcutStatus() }
     }
@@ -85,6 +106,17 @@ final class AppCoordinator: ObservableObject {
         SMAppService.mainApp.status == .requiresApproval
     }
     var hdmiShortcuts: [KeyboardShortcut?] { settings.hdmiShortcuts }
+    var sleepTVWithMac: Bool { settings.sleepTVWithMac }
+    var macHDMIPortOverride: Int { settings.macHDMIPortOverride }
+    var sleepTVNeedsRepair: Bool { settings.sleepTVWithMac && !settings.pairingGrantsPower }
+    /// Manual choice first, then the live EDID reading, then the last EDID reading.
+    var effectiveMacHDMIPort: Int? {
+        let override = settings.macHDMIPortOverride
+        if (1...4).contains(override) {
+            return override
+        }
+        return detectedMacHDMIPort ?? settings.lastDetectedMacHDMIPort
+    }
     var useTVInputNames: Bool { settings.useTVInputNames }
     var soundOutputOptions: [TVSoundOutputOption] {
         var options = TVSoundOutputOption.common.filter { !unsupportedSoundOutputIDs.contains($0.id) }
@@ -119,6 +151,17 @@ final class AppCoordinator: ObservableObject {
         applyAppearance()
         syncMenuState()
         keyboardVolumeMonitor.start()
+        refreshMacHDMIPort()
+        screenParametersObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshMacHDMIPort()
+            }
+        }
+        systemSleepMonitor.start()
         if !settings.tvIP.isEmpty {
             maintainConnection = true
             connect(showPairingPrompt: settings.clientKey.isEmpty)
@@ -178,6 +221,7 @@ final class AppCoordinator: ObservableObject {
         if ipChanged {
             maintainConnection = false
             cancelReconnect()
+            failPendingConnectionActions()
             resetActiveCommands()
             isConnecting = false
             webOSClient.disconnect()
@@ -188,12 +232,8 @@ final class AppCoordinator: ObservableObject {
             currentSoundOutputID = ""
             soundOutputAvailable = false
             unsupportedSoundOutputIDs.removeAll()
-        } else if secureConnectionChanged, webOSClient.isConnected || isConnecting {
-            cancelReconnect()
-            resetActiveCommands()
-            isConnecting = false
-            webOSClient.disconnect()
-            selectedHDMIIndex = nil
+        } else if secureConnectionChanged {
+            dropConnectionForTransportChange()
         }
         settings.tvIP = normalizedIP
         settings.tvName = name.isEmpty ? "LG TV" : name
@@ -209,6 +249,25 @@ final class AppCoordinator: ObservableObject {
         syncMenuState()
         status = text(.saveSuccess)
         settingsWindowController?.refresh()
+    }
+
+    /// Applies only the transport preference, without committing other unsaved settings fields.
+    func setSecureConnectionOnly(_ enabled: Bool) {
+        guard settings.secureConnectionOnly != enabled else { return }
+        dropConnectionForTransportChange()
+        settings.secureConnectionOnly = enabled
+        status = text(.saveSuccess)
+        settingsWindowController?.refresh()
+    }
+
+    private func dropConnectionForTransportChange() {
+        guard webOSClient.isConnected || isConnecting else { return }
+        cancelReconnect()
+        failPendingConnectionActions()
+        resetActiveCommands()
+        isConnecting = false
+        webOSClient.disconnect()
+        selectedHDMIIndex = nil
     }
 
     func restoreDefaultHDMIShortcuts() {
@@ -278,7 +337,7 @@ final class AppCoordinator: ObservableObject {
             }
         } catch {
             settings.launchAtLogin = SMAppService.mainApp.status == .enabled
-            status = "\(text(.launch)) \(error.localizedDescription)"
+            showError("\(text(.launch)) \(error.localizedDescription)")
         }
         settings.launchAtLogin = launchAtLogin
         settingsWindowController?.refresh()
@@ -312,24 +371,45 @@ final class AppCoordinator: ObservableObject {
     }
 
     func setVolumeFromPanel(_ volume: Int) {
-        pendingVolumeTarget = min(max(volume, 0), 100)
-        processPendingVolumeTarget()
+        pendingVolumeWork = .absolute(min(max(volume, 0), 100))
+        processPendingVolumeWork()
     }
 
     func toggleMuteFromPanel() {
         ensureConnectedThen { [weak self] in
-            guard let self else { return }
-            self.webOSClient.getMuted { [weak self] muteResult in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    let actualMuted: Bool
-                    if case .success(let muted) = muteResult {
-                        self.settings.muted = muted
-                        actualMuted = muted
-                    } else {
-                        actualMuted = self.settings.muted
-                    }
+            self?.requestMuteToggle()
+        }
+    }
+
+    /// Each toggle flips the most recent requested state. While the first read of the TV state is
+    /// in flight, further presses are counted so two quick presses cancel out instead of both
+    /// muting.
+    private func requestMuteToggle() {
+        if let targetInFlight = muteTargetInFlight {
+            performMuteCommand(targetMuted: !targetInFlight)
+            return
+        }
+        queuedMuteToggles += 1
+        guard !muteReadInFlight else { return }
+        muteReadInFlight = true
+        let generation = muteCommandGeneration
+        webOSClient.getMuted { [weak self] muteResult in
+            DispatchQueue.main.async {
+                guard let self, self.muteCommandGeneration == generation else { return }
+                self.muteReadInFlight = false
+                let actualMuted: Bool
+                if case .success(let muted) = muteResult {
+                    self.settings.muted = muted
+                    actualMuted = muted
+                } else {
+                    actualMuted = self.settings.muted
+                }
+                let toggles = self.queuedMuteToggles
+                self.queuedMuteToggles = 0
+                if toggles % 2 == 1 {
                     self.performMuteCommand(targetMuted: !actualMuted)
+                } else {
+                    self.syncMenuState()
                 }
             }
         }
@@ -339,11 +419,13 @@ final class AppCoordinator: ObservableObject {
         let previousMuted = settings.muted
         muteCommandGeneration += 1
         let generation = muteCommandGeneration
+        muteTargetInFlight = targetMuted
         settings.muted = targetMuted
         syncMenuState()
         webOSClient.setMuted(targetMuted) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self, self.muteCommandGeneration == generation else { return }
+                self.muteTargetInFlight = nil
                 if case .failure = result {
                     self.settings.muted = previousMuted
                     self.syncMenuState()
@@ -422,7 +504,10 @@ final class AppCoordinator: ObservableObject {
             ip: settings.tvIP,
             clientKey: settings.clientKey,
             forcePairing: showPairingPrompt,
-            secureConnectionOnly: settings.secureConnectionOnly
+            secureConnectionOnly: settings.secureConnectionOnly,
+            // New pairings always ask for power control; existing pairings keep the permission
+            // list they were approved with so reconnecting never triggers a new TV prompt.
+            includePowerControl: showPairingPrompt || settings.pairingGrantsPower
         ) { [weak self] result in
             guard let self else { return }
             self.isConnecting = false
@@ -432,7 +517,7 @@ final class AppCoordinator: ObservableObject {
                 guard self.webOSClient.isConnected else {
                     self.logger.log("connection", "registration completed after transport closed tokenSaved=\(saved)")
                     if !saved {
-                        self.status = self.text(.pairingTokenSaveFailed)
+                        self.showError(self.text(.pairingTokenSaveFailed))
                         self.failPendingConnectionActions()
                         return
                     }
@@ -441,9 +526,14 @@ final class AppCoordinator: ObservableObject {
                 }
                 self.cancelReconnect()
                 self.reconnectAttempt = 0
-                self.status = saved
-                    ? "\(self.text(.connected)) \(self.settings.tvName)"
-                    : self.text(.pairingTokenSaveFailed)
+                if saved && showPairingPrompt && !clientKey.isEmpty {
+                    self.settings.pairingGrantsPower = true
+                }
+                if saved {
+                    self.status = "\(self.text(.connected)) \(self.settings.tvName)"
+                } else {
+                    self.showError(self.text(.pairingTokenSaveFailed))
+                }
                 self.logger.log("connection", "connected tokenSaved=\(saved)")
                 self.startStateSubscriptions()
                 self.requestVolume()
@@ -457,7 +547,7 @@ final class AppCoordinator: ObservableObject {
                 self.logger.log("connection", "connect failed: \(message)")
                 self.failPendingConnectionActions()
                 self.selectedHDMIIndex = nil
-                self.status = message
+                self.showError(message)
                 if message == self.text(.certificateChanged) || message == self.text(.certificateSaveFailed) {
                     self.maintainConnection = false
                 } else if !showPairingPrompt {
@@ -494,38 +584,44 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    private func processPendingVolumeTarget() {
-        guard !volumeCommandInFlight, let target = pendingVolumeTarget else {
+    private func processPendingVolumeWork() {
+        guard !volumeCommandInFlight, let work = pendingVolumeWork else {
             return
         }
-        pendingVolumeTarget = nil
-        activeVolumeTarget = target
+        let (batch, remainder) = VolumeWork.takeBatch(from: work)
+        pendingVolumeWork = remainder
         volumeCommandInFlight = true
         volumeCommandGeneration += 1
         let generation = volumeCommandGeneration
         activeVolumeCommandGeneration = generation
         ensureConnectedThen({ [weak self] in
-            self?.performVolumeCommand(target: target, generation: generation)
+            self?.performVolumeCommand(batch, generation: generation)
         }, onFailure: { [weak self] in
-            self?.pendingVolumeTarget = nil
-            self?.activeVolumeTarget = nil
-            self?.volumeCommandInFlight = false
-            self?.activeVolumeCommandGeneration = nil
+            guard let self, self.activeVolumeCommandGeneration == generation else { return }
+            self.pendingVolumeWork = nil
+            self.volumeCommandInFlight = false
+            self.activeVolumeCommandGeneration = nil
         })
     }
 
-    private func performVolumeCommand(target: Int, generation: Int) {
+    private func performVolumeCommand(_ work: VolumeWork, generation: Int) {
         guard activeVolumeCommandGeneration == generation else {
             return
         }
         let current = settings.volume
+        let completion: (LGResult<TVVolumeStatus>) -> Void = { [weak self] result in
+            self?.finishVolumeCommand(result, work: work, generation: generation)
+        }
 
-        volumeExecutor.execute(target: target, current: current) { [weak self] result in
-            self?.finishVolumeCommand(result, target: target, generation: generation)
+        switch work {
+        case .absolute(let target):
+            volumeExecutor.execute(target: target, current: current, completion: completion)
+        case .steps(let delta):
+            volumeExecutor.executeSteps(delta, current: current, completion: completion)
         }
     }
 
-    private func finishVolumeCommand(_ result: LGResult<TVVolumeStatus>, target: Int, generation: Int) {
+    private func finishVolumeCommand(_ result: LGResult<TVVolumeStatus>, work: VolumeWork, generation: Int) {
         guard activeVolumeCommandGeneration == generation else {
             return
         }
@@ -537,20 +633,18 @@ final class AppCoordinator: ObservableObject {
             }
             status = "\(text(.volume)) \(volumeStatus.volume)%"
         case .failure(let message):
-            status = message
+            showError(message)
             logger.log("volume", "command failed after verification: \(message)")
-        }
-        if let queuedTarget = pendingVolumeTarget {
-            let completedTarget = activeVolumeTarget ?? target
-            let remainingDelta = queuedTarget - completedTarget
-            pendingVolumeTarget = min(max(settings.volume + remainingDelta, 0), 100)
+            if case .steps = work, case .steps = pendingVolumeWork {
+                // Do not keep firing native steps at a TV that just rejected one.
+                pendingVolumeWork = nil
+            }
         }
         syncMenuState()
         volumeCommandInFlight = false
-        activeVolumeTarget = nil
         activeVolumeCommandGeneration = nil
-        if pendingVolumeTarget != nil {
-            processPendingVolumeTarget()
+        if pendingVolumeWork != nil {
+            processPendingVolumeWork()
         } else {
             requestVolume(updateStatus: false)
         }
@@ -569,7 +663,7 @@ final class AppCoordinator: ObservableObject {
             syncMenuState()
         case .failure(let message):
             if updateStatus {
-                status = message
+                showError(message)
             }
         }
     }
@@ -579,8 +673,13 @@ final class AppCoordinator: ObservableObject {
         case .success:
             status = success
         case .failure(let message):
-            status = message
+            showError(message)
         }
+    }
+
+    private func showError(_ message: String) {
+        status = message
+        statusIsError = true
     }
 
     private func handleConnectionStateChanged(_ connected: Bool) {
@@ -605,10 +704,11 @@ final class AppCoordinator: ObservableObject {
         adjustVolumeFromPanel(delta: delta)
     }
 
+    /// Queues native TV volume steps; consecutive presses stay native steps rather than being
+    /// folded into an absolute target.
     func adjustVolumeFromPanel(delta: Int) {
-        let baseVolume = pendingVolumeTarget ?? activeVolumeTarget ?? settings.volume
-        let target = min(max(baseVolume + delta, 0), 100)
-        setVolumeFromPanel(target)
+        pendingVolumeWork = VolumeWork.adding(steps: delta, to: pendingVolumeWork)
+        processPendingVolumeWork()
     }
 
     private func applyAppearance() {
@@ -634,6 +734,99 @@ final class AppCoordinator: ObservableObject {
             menuHDMINames = settings.hdmiNames
         }
         menuLanguageMode = settings.languageMode
+    }
+
+    func setSleepTVWithMac(_ enabled: Bool) {
+        settings.sleepTVWithMac = enabled
+        logger.log("power", "sleep TV with Mac enabled=\(enabled) macPort=\(effectiveMacHDMIPort.map(String.init) ?? "none")")
+        settingsWindowController?.refresh()
+    }
+
+    func setMacHDMIPortOverride(_ port: Int) {
+        settings.macHDMIPortOverride = port
+        objectWillChange.send()
+        settingsWindowController?.refresh()
+    }
+
+    private func refreshMacHDMIPort() {
+        let port = MacHDMIPortDetector.detectPort()
+        if let port {
+            settings.lastDetectedMacHDMIPort = port
+        }
+        guard port != detectedMacHDMIPort else { return }
+        detectedMacHDMIPort = port
+        logger.log("power", "mac HDMI port detected=\(port.map(String.init) ?? "none")")
+        settingsWindowController?.refresh()
+    }
+
+    /// Called while macOS waits for this app before sleeping. `done` must be called once; the
+    /// monitor also calls it after a timeout. The TV is only turned off when a fresh read shows
+    /// it is displaying the Mac's input; every other case leaves the TV untouched.
+    private func handleSystemWillSleep(done: @escaping @MainActor () -> Void) {
+        guard settings.sleepTVWithMac else { return done() }
+        guard webOSClient.isConnected else {
+            logger.log("power", "sleep: TV not connected, leaving it alone")
+            return done()
+        }
+        let macPort = effectiveMacHDMIPort
+        let requestedAt = Date()
+        webOSClient.getForegroundAppID { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return done() }
+                let appID: String?
+                if Date().timeIntervalSince(requestedAt) > Self.sleepReadFreshness {
+                    // Too slow to trust: the input may have changed meanwhile.
+                    appID = nil
+                } else if case .success(let value) = result {
+                    appID = value
+                } else {
+                    appID = nil
+                }
+                let decision = TVSleepPolicy.decide(
+                    enabled: self.settings.sleepTVWithMac,
+                    macPort: macPort,
+                    foregroundAppID: appID,
+                    inputs: self.externalInputs
+                )
+                guard decision == .turnOff else {
+                    if case .skip(let reason) = decision {
+                        self.logger.log("power", "sleep: leaving TV on (\(reason))")
+                    }
+                    return done()
+                }
+                self.logger.log("power", "sleep: TV shows the Mac input, turning it off")
+                self.webOSClient.turnOff { [weak self] result in
+                    DispatchQueue.main.async {
+                        if case .failure(let message) = result {
+                            self?.logger.log("power", "sleep: turn off failed: \(message)")
+                            if self?.isPermissionError(message) == true {
+                                self?.settings.pairingGrantsPower = false
+                            }
+                        }
+                        done()
+                    }
+                }
+            }
+        }
+    }
+
+    private func handleSystemDidWake() {
+        refreshMacHDMIPort()
+        guard maintainConnection, !settings.tvIP.isEmpty, !settings.clientKey.isEmpty else { return }
+        // The socket may look open after sleep while the TV has long dropped it; start fresh.
+        logger.log("power", "wake: reconnecting")
+        cancelReconnect()
+        reconnectAttempt = 0
+        if webOSClient.isConnected {
+            webOSClient.disconnect()
+        } else if !isConnecting {
+            scheduleReconnect()
+        }
+    }
+
+    private func isPermissionError(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("401") || lower.contains("permission") || lower.contains("not allowed")
     }
 
     func detectedHDMIName(_ index: Int) -> String? {
@@ -665,7 +858,7 @@ final class AppCoordinator: ObservableObject {
                     }
                     let title = TVSoundOutputOption.common.first(where: { $0.id == outputID })
                         .map(self.soundOutputTitle) ?? outputID
-                    self.handleCommandResult(result, success: "\(self.text(.soundOutput))：\(title)")
+                    self.handleCommandResult(result, success: "\(self.text(.soundOutput))\(L10n.labelSeparator(languageMode: self.settings.languageMode))\(title)")
                 }
             }
         }
@@ -803,11 +996,13 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func resetActiveCommands() {
-        pendingVolumeTarget = nil
-        activeVolumeTarget = nil
+        pendingVolumeWork = nil
         volumeCommandInFlight = false
         activeVolumeCommandGeneration = nil
         muteCommandGeneration += 1
+        muteTargetInFlight = nil
+        muteReadInFlight = false
+        queuedMuteToggles = 0
         soundOutputCommandGeneration += 1
         soundOutputConfirmationWorkItem?.cancel()
         soundOutputConfirmationWorkItem = nil
@@ -829,4 +1024,5 @@ final class AppCoordinator: ObservableObject {
     }
 
     private static let keyboardVolumeStep = 1
+    private static let sleepReadFreshness: TimeInterval = 3
 }

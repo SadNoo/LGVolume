@@ -44,7 +44,7 @@ final class VolumeCommandExecutor {
         }
 
         if abs(target - current) == 1 {
-            executeNativeStep(target: target, current: current, completion: completion)
+            executeSteps(target - current, current: current, completion: completion)
             return
         }
 
@@ -75,35 +75,42 @@ final class VolumeCommandExecutor {
         }
     }
 
-    private func executeNativeStep(
-        target: Int,
+    /// Sends `delta` native volumeUp/volumeDown steps and verifies the TV moved in that direction.
+    /// The TV decides how far each step goes; already being at 0 or 100 counts as success.
+    func executeSteps(
+        _ delta: Int,
         current: Int,
         completion: @escaping (LGResult<TVVolumeStatus>) -> Void
     ) {
-        let direction = target > current ? 1 : -1
-        logger.log("volume", "native step direction=\(direction) current=\(current)")
-        controller.changeVolume(delta: direction) { [weak self] result in
+        guard delta != 0 else {
+            controller.getVolume(completion: completion)
+            return
+        }
+        let current = min(max(current, 0), 100)
+        let direction = delta > 0 ? 1 : -1
+        logger.log("volume", "native steps delta=\(delta) current=\(current)")
+        controller.changeVolume(delta: delta) { [weak self] result in
             guard let self else { return }
-            guard case .success = result else {
-                completion(.failure(self.verificationFailure()))
+            if case .failure(let message) = result {
+                completion(.failure(message))
                 return
             }
             self.delay(0.35) {
                 self.controller.getVolume { result in
                     switch result {
                     case .success(let status)
-                        where (direction > 0 && status.volume > current)
-                            || (direction < 0 && status.volume < current):
-                        self.logger.log("volume", "native step verified actual=\(status.volume)")
+                        where (direction > 0 && (status.volume > current || status.volume == 100))
+                            || (direction < 0 && (status.volume < current || status.volume == 0)):
+                        self.logger.log("volume", "native steps verified actual=\(status.volume)")
                         completion(.success(status))
                     case .success(let status):
                         self.logger.log(
                             "volume",
-                            "native step unchanged direction=\(direction) current=\(current) actual=\(status.volume)"
+                            "native steps unchanged delta=\(delta) current=\(current) actual=\(status.volume)"
                         )
                         completion(.failure(self.verificationFailure()))
                     case .failure(let message):
-                        self.logger.log("volume", "native step read failed: \(message)")
+                        self.logger.log("volume", "native steps read failed: \(message)")
                         completion(.failure(message))
                     }
                 }

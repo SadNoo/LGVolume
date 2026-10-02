@@ -24,7 +24,8 @@ struct KeyboardShortcut: Equatable {
     }
 
     init?(storageValue: String) {
-        let parts = storageValue.components(separatedBy: "|")
+        // The display string may itself be "|" (Shift-Backslash), so only split off the first two fields.
+        let parts = storageValue.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
         guard parts.count == 3,
               let keyCode = UInt16(parts[0]),
               let modifierRaw = UInt(parts[1]) else {
@@ -142,6 +143,9 @@ struct KeyboardShortcut: Equatable {
     }
 }
 
+/// A non-editable field that records a global shortcut while it is the first responder.
+/// It never acts as a text field: typed characters are not inserted, and key equivalents are
+/// captured only while this field has focus, so window shortcuts such as Command-W keep working.
 final class ShortcutRecorderField: NSTextField {
     var recordingPlaceholder = "Press a shortcut"
     var emptyPlaceholder = "Not set"
@@ -153,21 +157,74 @@ final class ShortcutRecorderField: NSTextField {
         }
     }
 
-    override var acceptsFirstResponder: Bool { true }
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
+        isEditable = false
+        isSelectable = false
+        isBezeled = true
+        bezelStyle = .roundedBezel
+        drawsBackground = true
+        focusRingType = .exterior
+        setAccessibilityRole(.button)
+    }
+
+    override var acceptsFirstResponder: Bool { isEnabled }
+    override var canBecomeKeyView: Bool { isEnabled }
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+    }
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
-        if accepted, shortcut == nil {
+        if accepted {
             placeholderString = recordingPlaceholder
+            noteFocusRingMaskChanged()
         }
         return accepted
     }
 
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            placeholderString = emptyPlaceholder
+            noteFocusRingMaskChanged()
+        }
+        return resigned
+    }
+
     override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control])
+        if event.keyCode == 48, modifiers.isEmpty {
+            // Tab and Shift-Tab move focus instead of being recorded.
+            if event.modifierFlags.contains(.shift) {
+                window?.selectPreviousKeyView(self)
+            } else {
+                window?.selectNextKeyView(self)
+            }
+            return
+        }
         capture(event)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown, window?.firstResponder === self else {
+            return super.performKeyEquivalent(with: event)
+        }
         capture(event)
         return true
     }

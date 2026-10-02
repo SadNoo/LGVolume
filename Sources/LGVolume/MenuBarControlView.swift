@@ -2,11 +2,18 @@ import SwiftUI
 
 struct MenuBarControlView: View {
     @ObservedObject var coordinator: AppCoordinator
+    @State private var draggingVolume: Double?
+    @State private var isEditingVolume = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.bottom, 12)
+                .padding(.bottom, coordinator.statusIsError ? 6 : 12)
+
+            if coordinator.statusIsError {
+                errorBanner
+                    .padding(.bottom, 10)
+            }
 
             volumeControls
                 .padding(.bottom, 10)
@@ -88,8 +95,16 @@ struct MenuBarControlView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
 
-                Slider(value: volumeBinding, in: 0...100, step: 1)
-                    .disabled(!coordinator.isConnected)
+                // No `step:` here: on macOS it draws 101 tick marks under the track.
+                Slider(value: volumeBinding, in: 0...100) { editing in
+                    isEditingVolume = editing
+                    if !editing {
+                        draggingVolume = nil
+                    }
+                }
+                .disabled(!coordinator.isConnected)
+                .accessibilityLabel(coordinator.text(.volume))
+                .accessibilityValue(displayVolumeText)
 
                 Image(systemName: "speaker.wave.3.fill")
                     .font(.system(size: 10, weight: .semibold))
@@ -162,6 +177,14 @@ struct MenuBarControlView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
 
+                if coordinator.effectiveMacHDMIPort == index + 1 {
+                    Image(systemName: "macmini")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .help("Mac")
+                        .accessibilityLabel("Mac")
+                }
+
                 Spacer(minLength: 6)
 
                 Image(systemName: selected ? "checkmark" : "circle")
@@ -215,10 +238,34 @@ struct MenuBarControlView: View {
         .buttonStyle(.borderless)
     }
 
+    private var errorBanner: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.orange)
+            Text(coordinator.status)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// While dragging, the thumb follows the pointer and targets are sent as the value changes;
+    /// TV read-backs that arrive mid-drag do not move the thumb under the user's finger.
     private var volumeBinding: Binding<Double> {
         Binding(
-            get: { Double(coordinator.menuVolume) },
-            set: { coordinator.setVolumeFromPanel(Int($0.rounded())) }
+            get: { draggingVolume ?? Double(coordinator.menuVolume) },
+            set: { value in
+                let previous = draggingVolume?.rounded()
+                if isEditingVolume {
+                    draggingVolume = value
+                }
+                if value.rounded() != previous {
+                    coordinator.setVolumeFromPanel(Int(value.rounded()))
+                }
+            }
         )
     }
 
@@ -240,7 +287,13 @@ struct MenuBarControlView: View {
     }
 
     private var displayVolumeText: String {
-        coordinator.menuMuted ? coordinator.text(.muted) : "\(coordinator.menuVolume)%"
+        guard coordinator.isConnected else {
+            return "—"
+        }
+        if let draggingVolume {
+            return "\(Int(draggingVolume.rounded()))%"
+        }
+        return coordinator.menuMuted ? coordinator.text(.muted) : "\(coordinator.menuVolume)%"
     }
 }
 

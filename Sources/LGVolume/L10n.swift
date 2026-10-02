@@ -91,6 +91,13 @@ enum L10n {
         case volumeReadFailed
         case volumeNotApplied
         case preferencesSubtitle
+        case macInput
+        case macInputAuto
+        case macInputNotDetected
+        case power
+        case sleepTVWithMac
+        case sleepTVWithMacHelp
+        case powerPermissionNeedsRepair
     }
 
     static func text(_ key: Key, languageMode: String) -> String {
@@ -114,10 +121,16 @@ enum L10n {
         if preferred.hasPrefix("ja") {
             return "ja"
         }
-        if preferred.hasPrefix("en") {
-            return "en"
+        if preferred.hasPrefix("zh") {
+            return "zh-Hans"
         }
-        return "zh-Hans"
+        // Any other system language reads English better than Chinese.
+        return "en"
+    }
+
+    /// "Label: value" separator that matches the resolved language's punctuation.
+    static func labelSeparator(languageMode: String) -> String {
+        resolvedLanguage(from: languageMode) == "en" ? ": " : "："
     }
 
     private static let simplifiedChinese: [Key: String] = [
@@ -209,7 +222,14 @@ enum L10n {
         .volume: "音量",
         .volumeReadFailed: "无法读取电视音量。",
         .volumeNotApplied: "电视没有执行音量调整，请查看诊断日志。",
-        .preferencesSubtitle: "调整外观、语言和登录启动。"
+        .preferencesSubtitle: "调整外观、语言和登录启动。",
+        .macInput: "Mac 所在输入：",
+        .macInputAuto: "自动识别",
+        .macInputNotDetected: "未识别到 Mac 连接的 LG 电视 HDMI 口。",
+        .power: "电源：",
+        .sleepTVWithMac: "Mac 睡眠时让电视待机",
+        .sleepTVWithMacHelp: "仅当电视正在显示 Mac 所在的 HDMI 输入时才会待机；正在使用其他输入（如 Switch 2）或无法确认时不做任何操作。",
+        .powerPermissionNeedsRepair: "需要在“通用”中点击“重新配对”，并在电视上确认，才能授予待机权限。",
     ]
 
     private static let english: [Key: String] = [
@@ -301,7 +321,14 @@ enum L10n {
         .volume: "Volume",
         .volumeReadFailed: "Unable to read the TV volume.",
         .volumeNotApplied: "The TV did not apply the volume change. Check the diagnostics log.",
-        .preferencesSubtitle: "Adjust appearance, language, and launch at login."
+        .preferencesSubtitle: "Adjust appearance, language, and launch at login.",
+        .macInput: "Mac input:",
+        .macInputAuto: "Automatic",
+        .macInputNotDetected: "No LG TV HDMI port detected for this Mac.",
+        .power: "Power:",
+        .sleepTVWithMac: "Put the TV in standby when the Mac sleeps",
+        .sleepTVWithMacHelp: "Only when the TV is showing the Mac’s HDMI input. Nothing happens while another input (such as Switch 2) is shown or when the input cannot be confirmed.",
+        .powerPermissionNeedsRepair: "Click Re-pair in General and accept on the TV to grant the standby permission.",
     ]
 
     private static let japanese: [Key: String] = [
@@ -393,6 +420,13 @@ enum L10n {
         .volume: "音量",
         .volumeReadFailed: "テレビの音量を取得できませんでした。",
         .volumeNotApplied: "テレビで音量変更が実行されませんでした。診断ログを確認してください。",
-        .preferencesSubtitle: "外観、言語、ログイン時の起動を設定します。"
+        .preferencesSubtitle: "外観、言語、ログイン時の起動を設定します。",
+        .macInput: "Mac の入力：",
+        .macInputAuto: "自動検出",
+        .macInputNotDetected: "この Mac が接続されている LG テレビの HDMI 端子を検出できません。",
+        .power: "電源：",
+        .sleepTVWithMac: "Mac のスリープ時にテレビをスタンバイにする",
+        .sleepTVWithMacHelp: "テレビが Mac の HDMI 入力を表示している場合のみ実行します。他の入力（Switch 2 など）を表示中、または確認できない場合は何もしません。",
+        .powerPermissionNeedsRepair: "「一般」で「再ペアリング」をクリックし、テレビで許可するとスタンバイ権限が付与されます。",
     ]
 }

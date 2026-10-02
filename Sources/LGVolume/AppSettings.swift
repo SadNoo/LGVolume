@@ -26,6 +26,10 @@ final class AppSettings {
         static let languageMode = "languageMode"
         static let secureConnectionOnly = "secureConnectionOnly"
         static let useTVInputNames = "useTVInputNames"
+        static let sleepTVWithMac = "sleepTVWithMac"
+        static let macHDMIPortOverride = "macHDMIPortOverride"
+        static let lastDetectedMacHDMIPort = "lastDetectedMacHDMIPort"
+        static let pairingGrantsPower = "pairingGrantsPower"
     }
 
     var tvIP: String {
@@ -111,6 +115,7 @@ final class AppSettings {
     func clearClientKey() {
         tokenStore.clear()
         defaults.removeObject(forKey: Key.clientKey)
+        pairingGrantsPower = false
     }
 
     var appearanceMode: String {
@@ -146,6 +151,37 @@ final class AppSettings {
     var useTVInputNames: Bool {
         get { defaults.bool(forKey: Key.useTVInputNames) }
         set { defaults.set(newValue, forKey: Key.useTVInputNames) }
+    }
+
+    /// Put the TV in standby when the Mac goes to system sleep (only if it shows the Mac's input).
+    var sleepTVWithMac: Bool {
+        get { defaults.bool(forKey: Key.sleepTVWithMac) }
+        set { defaults.set(newValue, forKey: Key.sleepTVWithMac) }
+    }
+
+    /// 0 means automatic detection from the TV's EDID; 1-4 forces an HDMI input.
+    var macHDMIPortOverride: Int {
+        get {
+            let value = defaults.integer(forKey: Key.macHDMIPortOverride)
+            return (1...4).contains(value) ? value : 0
+        }
+        set { defaults.set((1...4).contains(newValue) ? newValue : 0, forKey: Key.macHDMIPortOverride) }
+    }
+
+    /// Last port read from the EDID, kept for moments when the display is briefly unavailable.
+    var lastDetectedMacHDMIPort: Int? {
+        get {
+            let value = defaults.integer(forKey: Key.lastDetectedMacHDMIPort)
+            return (1...4).contains(value) ? value : nil
+        }
+        set { defaults.set(newValue ?? 0, forKey: Key.lastDetectedMacHDMIPort) }
+    }
+
+    /// Whether the saved pairing was registered with the power permission. Older pairings were
+    /// not, and reconnecting with a different permission list could make the TV prompt again.
+    var pairingGrantsPower: Bool {
+        get { defaults.bool(forKey: Key.pairingGrantsPower) }
+        set { defaults.set(newValue, forKey: Key.pairingGrantsPower) }
     }
 
     private func migratePreferencesTokenIfNeeded() {

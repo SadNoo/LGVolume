@@ -74,12 +74,17 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private let volumeTitleLabel = NSTextField(labelWithString: "")
     private let volumePercentLabel = NSTextField(labelWithString: "")
     private let ipFeedbackLabel = NSTextField(labelWithString: "")
+    private let statusMessageLabel = NSTextField(wrappingLabelWithString: "")
+    private let saveFeedbackLabel = NSTextField(labelWithString: "")
     private let shortcutStateLabel = NSTextField(labelWithString: "")
     private let appearanceControl = NSSegmentedControl(labels: ["自动", "浅色", "深色"], trackingMode: .selectOne, target: nil, action: nil)
     private let languageControl = NSSegmentedControl(labels: ["自动", "中文", "English", "日本語"], trackingMode: .selectOne, target: nil, action: nil)
     private let launchAtLoginButton = NSButton(checkboxWithTitle: "登录时自动启动 LGVolume", target: nil, action: nil)
     private let secureConnectionButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let useTVInputNamesButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let sleepTVButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let powerHelpLabel = NSTextField(wrappingLabelWithString: "")
+    private let macInputPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let detectedInputNamesLabel = NSTextField(labelWithString: "")
     private let ipField = NSTextField()
     private let nameField = NSTextField()
@@ -93,6 +98,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private let diagnosticsButton = NSButton(title: "", target: nil, action: nil)
     private var renderedLanguageMode: String?
     private var hasLoadedEditableValues = false
+    private var saveFeedbackWorkItem: DispatchWorkItem?
 
     init(settings: AppSettings, coordinator: AppCoordinator) {
         self.settings = settings
@@ -133,6 +139,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         }
         updateIPFeedback()
         updateHDMIInputMode()
+        updatePowerControls()
     }
 
     func refreshLocalizedText() {
@@ -154,8 +161,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         launchAtLoginButton.title = t(.launchAtLogin)
         secureConnectionButton.title = t(.secureConnectionOnly)
         useTVInputNamesButton.title = t(.useTVInputNames)
+        sleepTVButton.title = t(.sleepTVWithMac)
         ipField.placeholderString = t(.inputIP)
-        volumeTitleLabel.stringValue = "\(t(.volume))："
+        volumeTitleLabel.stringValue = formLabelText(t(.volume))
         shortcutStateLabel.stringValue = t(.shortcutsEnabled)
         connectButton.title = coordinator?.isConnected == true ? t(.disconnect) : t(.pairConnect)
         repairButton.title = t(.repairPairing)
@@ -188,7 +196,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             connectionNameLabel.attributedStringValue = connectionTitle(settings.tvName, connected: true)
         } else {
             connectionNameLabel.attributedStringValue = connectionTitle(t(.currentDisconnected), connected: false)
+            volumePercentLabel.stringValue = "—"
         }
+
+        let isError = coordinator?.statusIsError == true
+        statusMessageLabel.stringValue = isError ? coordinator?.status ?? "" : ""
+        statusMessageLabel.textColor = .systemOrange
+        statusMessageLabel.isHidden = !isError
     }
 
     func updateDevices(_ devices: [DiscoveredTV]) {
@@ -338,9 +352,21 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         launchAtLoginButton.target = self
         launchAtLoginButton.action = #selector(changeLaunchAtLogin)
         secureConnectionButton.target = self
-        secureConnectionButton.action = #selector(save)
+        secureConnectionButton.action = #selector(changeSecureConnection)
         useTVInputNamesButton.target = self
         useTVInputNamesButton.action = #selector(changeHDMIInputMode)
+        sleepTVButton.identifier = NSUserInterfaceItemIdentifier("settings.sleepTVWithMac")
+        sleepTVButton.target = self
+        sleepTVButton.action = #selector(changeSleepTVWithMac)
+        powerHelpLabel.identifier = NSUserInterfaceItemIdentifier("settings.powerHelp")
+        powerHelpLabel.font = .systemFont(ofSize: 12)
+        powerHelpLabel.preferredMaxLayoutWidth = 420
+        powerHelpLabel.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        macInputPopup.identifier = NSUserInterfaceItemIdentifier("settings.macInput")
+        macInputPopup.target = self
+        macInputPopup.action = #selector(changeMacInput)
+        macInputPopup.font = Self.formFont
+        macInputPopup.widthAnchor.constraint(equalToConstant: 220).isActive = true
 
         connectButton.target = self
         connectButton.action = #selector(connectOrDisconnect)
@@ -428,7 +454,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
 
         let footer = row()
         footer.edgeInsets = NSEdgeInsets(top: 9, left: 28, bottom: 11, right: 28)
+        saveFeedbackLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        saveFeedbackLabel.textColor = .systemGreen
+        saveFeedbackLabel.identifier = NSUserInterfaceItemIdentifier("settings.saveFeedback")
         footer.addArrangedSubview(spacer())
+        footer.addArrangedSubview(saveFeedbackLabel)
         footer.addArrangedSubview(saveButton)
         root.addArrangedSubview(footer)
         footer.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
@@ -509,6 +539,12 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             (nil, actionRow)
         ]))
 
+        statusMessageLabel.identifier = NSUserInterfaceItemIdentifier("settings.statusMessage")
+        statusMessageLabel.font = .systemFont(ofSize: 12)
+        statusMessageLabel.preferredMaxLayoutWidth = 560
+        statusMessageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 560).isActive = true
+        stack.addArrangedSubview(statusMessageLabel)
+
         return pageBox(stack)
     }
 
@@ -520,6 +556,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             (fixedLabel(.language), languageControl),
             (fixedLabel(.launch), launchAtLoginButton),
             (fixedLabel(.connection), secureConnectionButton),
+            (fixedLabel(.power), sleepTVButton),
+            (nil, powerHelpLabel),
             (fixedLabel(.diagnostics), diagnosticsButton)
         ]))
 
@@ -537,6 +575,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             detectedInputNamesLabel.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
         stack.addArrangedSubview(formGrid([
+            (fixedLabel(.macInput), macInputPopup),
             (fixedLabel(.inputNames), useTVInputNamesButton),
             (nil, detectedInputNamesLabel),
             (fixedLabel("HDMI1:"), hdmiNameFields[0]),
@@ -619,9 +658,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             let row = grid.row(at: index)
             row.yPlacement = .center
             let control = rows[index].control
-            row.height = control === ipFeedbackLabel || control === detectedInputNamesLabel
-                ? Self.secondaryRowHeight
-                : Self.formRowHeight
+            if control === powerHelpLabel {
+                row.height = Self.helpRowHeight
+            } else {
+                row.height = control === ipFeedbackLabel || control === detectedInputNamesLabel
+                    ? Self.secondaryRowHeight
+                    : Self.formRowHeight
+            }
         }
         return grid
     }
@@ -721,12 +764,19 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         hasLoadedEditableValues = true
     }
 
-    private func updateIPFeedback(text: String? = nil) {
-        if let text {
-            ipFeedbackLabel.stringValue = text
-            ipFeedbackLabel.textColor = .systemGreen
-            return
+    /// Save feedback lives in the footer next to the Save button so it is visible on every page.
+    private func showSaveFeedback() {
+        saveFeedbackLabel.stringValue = t(.saveSuccess)
+        saveFeedbackLabel.alphaValue = 1
+        saveFeedbackWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.saveFeedbackLabel.stringValue = ""
         }
+        saveFeedbackWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: workItem)
+    }
+
+    private func updateIPFeedback() {
 
         let ip = ipField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !ip.isEmpty else {
@@ -763,6 +813,32 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             ? t(.noInputsDetected)
             : "\(t(.detectedInputs)) \(detectedNames.joined(separator: "  ·  "))"
         detectedInputNamesLabel.toolTip = detectedInputNamesLabel.stringValue
+    }
+
+    private func updatePowerControls() {
+        guard let coordinator else { return }
+        sleepTVButton.state = coordinator.sleepTVWithMac ? .on : .off
+
+        let detected = coordinator.detectedMacHDMIPort
+        let autoTitle = detected.map { "\(t(.macInputAuto)) (HDMI\($0))" } ?? t(.macInputAuto)
+        let titles = [autoTitle] + (1...4).map { "HDMI\($0)" }
+        if macInputPopup.itemTitles != titles {
+            macInputPopup.removeAllItems()
+            macInputPopup.addItems(withTitles: titles)
+        }
+        macInputPopup.selectItem(at: coordinator.macHDMIPortOverride)
+
+        if coordinator.sleepTVNeedsRepair {
+            powerHelpLabel.stringValue = t(.powerPermissionNeedsRepair)
+            powerHelpLabel.textColor = .systemOrange
+        } else if coordinator.sleepTVWithMac && coordinator.effectiveMacHDMIPort == nil {
+            powerHelpLabel.stringValue = t(.macInputNotDetected)
+            powerHelpLabel.textColor = .systemOrange
+        } else {
+            powerHelpLabel.stringValue = t(.sleepTVWithMacHelp)
+            powerHelpLabel.textColor = .secondaryLabelColor
+        }
+        macInputPopup.toolTip = detected == nil ? t(.macInputNotDetected) : nil
     }
 
     private func volumeString(volume: Int, muted: Bool) -> String {
@@ -809,6 +885,23 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         updateHDMIInputMode()
     }
 
+    @objc private func changeSleepTVWithMac() {
+        coordinator?.setSleepTVWithMac(sleepTVButton.state == .on)
+        updatePowerControls()
+        showSaveFeedback()
+    }
+
+    @objc private func changeMacInput() {
+        coordinator?.setMacHDMIPortOverride(max(0, macInputPopup.indexOfSelectedItem))
+        updatePowerControls()
+        showSaveFeedback()
+    }
+
+    @objc private func changeSecureConnection() {
+        coordinator?.setSecureConnectionOnly(secureConnectionButton.state == .on)
+        showSaveFeedback()
+    }
+
     @objc private func changeLaunchAtLogin() {
         coordinator?.setLaunchAtLogin(launchAtLoginButton.state == .on)
     }
@@ -821,6 +914,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         let ip = ipField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard ip.isEmpty || LocalNetworkAddress.isAllowedIPv4(ip) else {
             updateIPFeedback()
+            if selectedPage != .general {
+                selectPage(0)
+            }
+            window?.makeFirstResponder(ipField)
             NSSound.beep()
             return false
         }
@@ -833,7 +930,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             useTVInputNames: useTVInputNamesButton.state == .on
         )
         loadEditableValues()
-        updateIPFeedback(text: t(.saveSuccess))
+        updateIPFeedback()
+        showSaveFeedback()
         return true
     }
 
@@ -842,7 +940,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         for (offset, field) in hdmiShortcutFields.enumerated() {
             field.shortcut = settings.hdmiShortcut(offset + 1)
         }
-        updateIPFeedback(text: t(.saveSuccess))
+        showSaveFeedback()
     }
 
     @objc private func connectOrDisconnect() {
@@ -872,6 +970,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private static let labelColumnWidth: CGFloat = 120
     private static let formRowHeight: CGFloat = 30
     private static let secondaryRowHeight: CGFloat = 20
+    private static let helpRowHeight: CGFloat = 50
     private static let formControlHeight: CGFloat = 28
     private static let sidebarWidth: CGFloat = 176
 }

@@ -1,8 +1,8 @@
 import Foundation
 
 enum WebOSRegistration {
-    static func payload(forcePairing: Bool) -> [String: Any] {
-        let permissions = [
+    static func payload(forcePairing: Bool, includePowerControl: Bool = false) -> [String: Any] {
+        var permissions = [
             "CONTROL_AUDIO",
             "CONTROL_DISPLAY",
             "CONTROL_INPUT_TV",
@@ -10,6 +10,9 @@ enum WebOSRegistration {
             "READ_INPUT_DEVICE_LIST",
             "READ_RUNNING_APPS"
         ]
+        if includePowerControl {
+            permissions.append("CONTROL_POWER")
+        }
 
         return [
             "forcePairing": forcePairing,

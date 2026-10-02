@@ -54,6 +54,42 @@ final class VolumeCommandExecutorTests: XCTestCase {
         XCTAssertEqual(result?.value?.volume, 60)
     }
 
+    func testMultipleKeyboardStepsUseNativeStepsOnly() {
+        let controller = FakeVolumeController(volumes: [54])
+        let executor = makeExecutor(controller)
+        var result: LGResult<TVVolumeStatus>?
+
+        executor.executeSteps(4, current: 50) { result = $0 }
+
+        XCTAssertEqual(controller.stepDeltas, [4])
+        XCTAssertTrue(controller.absoluteTargets.isEmpty)
+        XCTAssertEqual(result?.value?.volume, 54)
+    }
+
+    func testStepAtUpperBoundIsNotReportedAsFailure() {
+        let controller = FakeVolumeController(volumes: [100])
+        let executor = makeExecutor(controller)
+        var result: LGResult<TVVolumeStatus>?
+
+        executor.executeSteps(1, current: 100) { result = $0 }
+
+        XCTAssertEqual(result?.value?.volume, 100)
+    }
+
+    func testStepCommandFailureKeepsTVErrorMessage() {
+        let controller = FakeVolumeController(volumes: [])
+        controller.stepFailure = "Not connected"
+        let executor = makeExecutor(controller)
+        var result: LGResult<TVVolumeStatus>?
+
+        executor.executeSteps(-1, current: 30) { result = $0 }
+
+        guard case .failure(let message) = result else {
+            return XCTFail("Expected failure")
+        }
+        XCTAssertEqual(message, "Not connected")
+    }
+
     private func makeExecutor(_ controller: FakeVolumeController) -> VolumeCommandExecutor {
         VolumeCommandExecutor(
             controller: controller,
@@ -72,6 +108,7 @@ private final class FakeVolumeController: TVVolumeControlling {
     private var volumes: [Int]
     var absoluteTargets: [Int] = []
     var stepDeltas: [Int] = []
+    var stepFailure: String?
 
     init(volumes: [Int]) {
         self.volumes = volumes
@@ -89,7 +126,11 @@ private final class FakeVolumeController: TVVolumeControlling {
 
     func changeVolume(delta: Int, completion: @escaping (LGResult<Void>) -> Void) {
         stepDeltas.append(delta)
-        completion(.success(()))
+        if let stepFailure {
+            completion(.failure(stepFailure))
+        } else {
+            completion(.success(()))
+        }
     }
 }
 

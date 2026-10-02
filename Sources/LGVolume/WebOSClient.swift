@@ -38,6 +38,7 @@ final class WebOSClient: NSObject {
         clientKey: String,
         forcePairing: Bool,
         secureConnectionOnly: Bool = false,
+        includePowerControl: Bool = false,
         completion: @escaping (LGResult<String>) -> Void
     ) {
         disconnect()
@@ -58,7 +59,15 @@ final class WebOSClient: NSObject {
             return
         }
 
-        connect(urls: urls, index: 0, ip: ip, clientKey: clientKey, forcePairing: forcePairing, completion: completion)
+        connect(
+            urls: urls,
+            index: 0,
+            ip: ip,
+            clientKey: clientKey,
+            forcePairing: forcePairing,
+            includePowerControl: includePowerControl,
+            completion: completion
+        )
     }
 
     func forgetServerTrust(ip: String) {
@@ -72,6 +81,7 @@ final class WebOSClient: NSObject {
         ip: String,
         clientKey: String,
         forcePairing: Bool,
+        includePowerControl: Bool,
         completion: @escaping (LGResult<String>) -> Void
     ) {
         guard urls.indices.contains(index) else {
@@ -92,6 +102,7 @@ final class WebOSClient: NSObject {
         configuration.waitsForConnectivity = false
         configuration.allowsConstrainedNetworkAccess = true
         configuration.allowsExpensiveNetworkAccess = true
+        configuration.connectionProxyDictionary = [:]
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: url)
         self.session = session
@@ -105,12 +116,13 @@ final class WebOSClient: NSObject {
                 ip: ip,
                 clientKey: clientKey,
                 forcePairing: forcePairing,
+                includePowerControl: includePowerControl,
                 completion: completion
             )
         }
 
         let id = makeID()
-        var payload = WebOSRegistration.payload(forcePairing: forcePairing)
+        var payload = WebOSRegistration.payload(forcePairing: forcePairing, includePowerControl: includePowerControl)
         var receivedPairingPrompt = false
         if !clientKey.isEmpty && !forcePairing {
             payload["client-key"] = clientKey
@@ -298,6 +310,13 @@ final class WebOSClient: NSObject {
             ) { fallbackResponse in
                 completion(self.resultFromResponse(fallbackResponse))
             }
+        }
+    }
+
+    /// Puts the TV in standby. Requires a pairing that granted CONTROL_POWER.
+    func turnOff(completion: @escaping (LGResult<Void>) -> Void) {
+        request(uri: "ssap://system/turnOff", payload: [:]) { response in
+            completion(self.resultFromResponse(response))
         }
     }
 
