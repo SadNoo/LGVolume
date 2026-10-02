@@ -175,7 +175,11 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Set by the status item controller; closes the menu bar panel.
+    var closeMenuPanel: (() -> Void)?
+
     func showSettings() {
+        closeMenuPanel?()
         keyboardVolumeMonitor.updateHDMIShortcuts(settings.hdmiShortcuts)
         let controller = getSettingsWindowController()
         controller.showWindow(nil)
@@ -184,6 +188,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     func quit() {
+        closeMenuPanel?()
         NSApp.terminate(nil)
     }
 

@@ -2,26 +2,27 @@ import SwiftUI
 
 @main
 struct LGVolumeApp: App {
-    @StateObject private var coordinator: AppCoordinator
-
-    init() {
-        let coordinator = AppCoordinator()
-        _coordinator = StateObject(wrappedValue: coordinator)
-        NSApplication.shared.setActivationPolicy(.accessory)
-        coordinator.start()
-    }
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarControlView(coordinator: coordinator)
-                .frame(width: coordinator.menuPreferredWidth)
-                .onAppear {
-                    coordinator.refreshTVState()
-                }
-        } label: {
-            Image(systemName: coordinator.menuMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .help(coordinator.status)
+        // The menu bar icon and panel are AppKit (StatusItemController). SwiftUI still needs a
+        // scene; an uninserted MenuBarExtra adds no window, menu item or status item.
+        MenuBarExtra("LGVolume", systemImage: "tv", isInserted: .constant(false)) {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var coordinator: AppCoordinator?
+    private var statusItemController: StatusItemController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        let coordinator = AppCoordinator()
+        self.coordinator = coordinator
+        statusItemController = StatusItemController(coordinator: coordinator)
+        coordinator.start()
     }
 }
