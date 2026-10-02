@@ -98,6 +98,23 @@ enum L10n {
         case sleepTVWithMac
         case sleepTVWithMacHelp
         case powerPermissionNeedsRepair
+        case menuStyle
+        case menuStyleCards
+        case menuStyleNative
+        case menuStyleControlCenter
+        case menuStyleCompact
+        case menuStyleRemote
+        case menuStyleClassic
+        case inputSources
+        case nowShowing
+        case inputNotConnected
+        case reconnect
+        case settingsEllipsis
+        case quitApp
+        case sleepTVShort
+        case needsRepairShort
+        case connecting
+        case notConnectedTV
     }
 
     static func text(_ key: Key, languageMode: String) -> String {
@@ -230,6 +247,23 @@ enum L10n {
         .sleepTVWithMac: "Mac 睡眠时让电视待机",
         .sleepTVWithMacHelp: "仅当电视正在显示 Mac 所在的 HDMI 输入时才会待机；正在使用其他输入（如 Switch 2）或无法确认时不做任何操作。",
         .powerPermissionNeedsRepair: "需要在“通用”中点击“重新配对”，并在电视上确认，才能授予待机权限。",
+        .menuStyle: "菜单样式：",
+        .menuStyleCards: "输入源卡片",
+        .menuStyleNative: "原生分区菜单",
+        .menuStyleControlCenter: "控制中心模块",
+        .menuStyleCompact: "紧凑工具条",
+        .menuStyleRemote: "双栏遥控",
+        .menuStyleClassic: "经典（1.0）",
+        .inputSources: "输入源",
+        .nowShowing: "正在显示",
+        .inputNotConnected: "未接入",
+        .reconnect: "重新连接",
+        .settingsEllipsis: "设置…",
+        .quitApp: "退出 LGVolume",
+        .sleepTVShort: "随 Mac 睡眠待机",
+        .needsRepairShort: "需重新配对",
+        .connecting: "正在连接…",
+        .notConnectedTV: "未连接到电视",
     ]
 
     private static let english: [Key: String] = [
@@ -329,6 +363,23 @@ enum L10n {
         .sleepTVWithMac: "Put the TV in standby when the Mac sleeps",
         .sleepTVWithMacHelp: "Only when the TV is showing the Mac’s HDMI input. Nothing happens while another input (such as Switch 2) is shown or when the input cannot be confirmed.",
         .powerPermissionNeedsRepair: "Click Re-pair in General and accept on the TV to grant the standby permission.",
+        .menuStyle: "Menu style:",
+        .menuStyleCards: "Input Cards",
+        .menuStyleNative: "Native Sections",
+        .menuStyleControlCenter: "Control Center",
+        .menuStyleCompact: "Compact Bar",
+        .menuStyleRemote: "Two-Column Remote",
+        .menuStyleClassic: "Classic (1.0)",
+        .inputSources: "Inputs",
+        .nowShowing: "Showing",
+        .inputNotConnected: "Not connected",
+        .reconnect: "Reconnect",
+        .settingsEllipsis: "Settings…",
+        .quitApp: "Quit LGVolume",
+        .sleepTVShort: "Standby with Mac",
+        .needsRepairShort: "Re-pair needed",
+        .connecting: "Connecting…",
+        .notConnectedTV: "Not connected to the TV",
     ]
 
     private static let japanese: [Key: String] = [
@@ -428,5 +479,22 @@ enum L10n {
         .sleepTVWithMac: "Mac のスリープ時にテレビをスタンバイにする",
         .sleepTVWithMacHelp: "テレビが Mac の HDMI 入力を表示している場合のみ実行します。他の入力（Switch 2 など）を表示中、または確認できない場合は何もしません。",
         .powerPermissionNeedsRepair: "「一般」で「再ペアリング」をクリックし、テレビで許可するとスタンバイ権限が付与されます。",
+        .menuStyle: "メニューのスタイル：",
+        .menuStyleCards: "入力カード",
+        .menuStyleNative: "ネイティブ",
+        .menuStyleControlCenter: "コントロールセンター",
+        .menuStyleCompact: "コンパクト",
+        .menuStyleRemote: "2 列リモコン",
+        .menuStyleClassic: "クラシック（1.0）",
+        .inputSources: "入力",
+        .nowShowing: "表示中",
+        .inputNotConnected: "未接続",
+        .reconnect: "再接続",
+        .settingsEllipsis: "設定…",
+        .quitApp: "LGVolume を終了",
+        .sleepTVShort: "Mac と一緒にスタンバイ",
+        .needsRepairShort: "再ペアリングが必要",
+        .connecting: "接続中…",
+        .notConnectedTV: "テレビに接続されていません",
     ]
 }

@@ -85,6 +85,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private let sleepTVButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let powerHelpLabel = NSTextField(wrappingLabelWithString: "")
     private let macInputPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let menuStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let detectedInputNamesLabel = NSTextField(labelWithString: "")
     private let ipField = NSTextField()
     private let nameField = NSTextField()
@@ -104,13 +105,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         self.settings = settings
         self.coordinator = coordinator
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 840, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 840, height: 480),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         window.title = "LGVolume \(L10n.text(.settings, languageMode: settings.languageMode))"
-        window.minSize = NSSize(width: 760, height: 390)
+        window.minSize = NSSize(width: 760, height: 440)
         window.center()
         super.init(window: window)
         configureControls()
@@ -140,6 +141,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         updateIPFeedback()
         updateHDMIInputMode()
         updatePowerControls()
+        updateMenuStyleSelection()
     }
 
     func refreshLocalizedText() {
@@ -362,6 +364,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         powerHelpLabel.font = .systemFont(ofSize: 12)
         powerHelpLabel.preferredMaxLayoutWidth = 420
         powerHelpLabel.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        menuStylePopup.identifier = NSUserInterfaceItemIdentifier("settings.menuStyle")
+        menuStylePopup.target = self
+        menuStylePopup.action = #selector(changeMenuStyle)
+        menuStylePopup.font = Self.formFont
+        menuStylePopup.widthAnchor.constraint(equalToConstant: 220).isActive = true
         macInputPopup.identifier = NSUserInterfaceItemIdentifier("settings.macInput")
         macInputPopup.target = self
         macInputPopup.action = #selector(changeMacInput)
@@ -553,6 +560,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
 
         stack.addArrangedSubview(formGrid([
             (fixedLabel(.appearance), appearanceControl),
+            (fixedLabel(.menuStyle), menuStylePopup),
             (fixedLabel(.language), languageControl),
             (fixedLabel(.launch), launchAtLoginButton),
             (fixedLabel(.connection), secureConnectionButton),
@@ -815,6 +823,16 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         detectedInputNamesLabel.toolTip = detectedInputNamesLabel.stringValue
     }
 
+    private func updateMenuStyleSelection() {
+        let titles = MenuPanelStyle.allCases.map { t($0.titleKey) }
+        if menuStylePopup.itemTitles != titles {
+            menuStylePopup.removeAllItems()
+            menuStylePopup.addItems(withTitles: titles)
+        }
+        let style = coordinator?.menuStyle ?? settings.menuStyle
+        menuStylePopup.selectItem(at: MenuPanelStyle.allCases.firstIndex(of: style) ?? 0)
+    }
+
     private func updatePowerControls() {
         guard let coordinator else { return }
         sleepTVButton.state = coordinator.sleepTVWithMac ? .on : .off
@@ -883,6 +901,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
 
     @objc private func changeHDMIInputMode() {
         updateHDMIInputMode()
+    }
+
+    @objc private func changeMenuStyle() {
+        let styles = MenuPanelStyle.allCases
+        let index = menuStylePopup.indexOfSelectedItem
+        guard styles.indices.contains(index) else { return }
+        coordinator?.setMenuStyle(styles[index])
+        showSaveFeedback()
     }
 
     @objc private func changeSleepTVWithMac() {

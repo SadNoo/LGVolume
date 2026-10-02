@@ -89,6 +89,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var currentSoundOutputID = ""
     @Published private(set) var soundOutputAvailable = false
     @Published private(set) var menuLanguageMode = "auto"
+    @Published private(set) var menuStyle: MenuPanelStyle = .defaultStyle
     /// The HDMI input read from the TV's EDID right now; nil while no LG TV EDID is visible.
     @Published private(set) var detectedMacHDMIPort: Int?
     @Published private(set) var shortcutRegistrationStates = Array(repeating: true, count: 7) {
@@ -131,8 +132,12 @@ final class AppCoordinator: ObservableObject {
         }
         return soundOutputTitle(option)
     }
-    var menuPreferredWidth: CGFloat {
-        220
+    /// Output name for rows that already carry a "Sound Output" label; "—" when unknown.
+    var soundOutputValueText: String {
+        currentSoundOutputID.isEmpty ? "—" : currentSoundOutputTitle
+    }
+        var menuPreferredWidth: CGFloat {
+        menuStyle.width
     }
 
     func soundOutputTitle(_ option: TVSoundOutputOption) -> String {
@@ -723,6 +728,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func syncMenuState() {
+        menuStyle = settings.menuStyle
         menuTitle = settings.tvName
         menuVolume = settings.volume
         menuMuted = settings.muted
@@ -736,8 +742,40 @@ final class AppCoordinator: ObservableObject {
         menuLanguageMode = settings.languageMode
     }
 
+    func setMenuStyle(_ style: MenuPanelStyle) {
+        settings.menuStyle = style
+        syncMenuState()
+        settingsWindowController?.refresh()
+    }
+
+    /// Name of the input the TV is showing, when it is one of the four HDMI inputs.
+    var selectedInputName: String? {
+        selectedHDMIIndex.flatMap { menuHDMINames.indices.contains($0 - 1) ? menuHDMINames[$0 - 1] : nil }
+    }
+
+    func inputSymbol(_ index: Int) -> String {
+        let input = externalInputs.first { $0.hdmiIndex == index }
+        let label = menuHDMINames.indices.contains(index - 1) ? menuHDMINames[index - 1] : ""
+        return InputSymbol.name(
+            isMac: effectiveMacHDMIPort == index,
+            label: "\(label) \(input?.label ?? "")",
+            tvIconName: input?.iconName
+        )
+    }
+
+    /// False only when the TV positively reports nothing plugged into that input.
+    func isInputConnected(_ index: Int) -> Bool {
+        externalInputs.first { $0.hdmiIndex == index }?.connected ?? true
+    }
+
+    func shortcutDisplay(_ index: Int) -> String? {
+        let shortcuts = settings.hdmiShortcuts
+        return shortcuts.indices.contains(index - 1) ? shortcuts[index - 1]?.display : nil
+    }
+
     func setSleepTVWithMac(_ enabled: Bool) {
         settings.sleepTVWithMac = enabled
+        objectWillChange.send()
         logger.log("power", "sleep TV with Mac enabled=\(enabled) macPort=\(effectiveMacHDMIPort.map(String.init) ?? "none")")
         settingsWindowController?.refresh()
     }

@@ -24,7 +24,7 @@ final class VisualPreviewTests: XCTestCase {
 
         let settingsWindow = try XCTUnwrap(settingsController.window)
         let settingsView = try XCTUnwrap(settingsWindow.contentView)
-        let settingsSize = NSSize(width: 840, height: 430)
+        let settingsSize = NSSize(width: 840, height: 480)
         settingsWindow.appearance = NSAppearance(named: .aqua)
         settingsView.frame.size = settingsSize
         settingsWindow.layoutIfNeeded()
@@ -90,27 +90,36 @@ final class VisualPreviewTests: XCTestCase {
         }
         settingsController.close()
 
-        let menuView = NSHostingView(
-            rootView: MenuBarControlView(coordinator: coordinator)
-                .frame(width: coordinator.menuPreferredWidth)
-        )
-        XCTAssertEqual(coordinator.menuPreferredWidth, 220)
-        menuView.wantsLayer = true
-        let menuSize = NSSize(width: coordinator.menuPreferredWidth, height: max(menuView.fittingSize.height, 300))
-        let menuWindow = NSWindow(
-            contentRect: NSRect(origin: .zero, size: menuSize),
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
-        menuWindow.contentView = menuView
-        menuWindow.makeKeyAndOrderFront(nil)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
-        menuWindow.layoutIfNeeded()
-        menuView.layoutSubtreeIfNeeded()
-        menuView.displayIfNeeded()
-        try render(menuView, size: menuSize, to: outputDirectory.appendingPathComponent("menu-panel.png"))
-        menuWindow.orderOut(nil)
+        XCTAssertEqual(coordinator.menuStyle, .cards)
+        for style in MenuPanelStyle.allCases {
+            coordinator.setMenuStyle(style)
+            XCTAssertEqual(coordinator.menuPreferredWidth, style.width)
+            for dark in [false, true] {
+                let menuView = NSHostingView(
+                    rootView: MenuBarControlView(coordinator: coordinator)
+                        .frame(width: coordinator.menuPreferredWidth)
+                )
+                menuView.wantsLayer = true
+                menuView.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                let menuSize = NSSize(width: coordinator.menuPreferredWidth, height: max(menuView.fittingSize.height, 200))
+                let menuWindow = NSWindow(
+                    contentRect: NSRect(origin: .zero, size: menuSize),
+                    styleMask: .borderless,
+                    backing: .buffered,
+                    defer: false
+                )
+                menuWindow.appearance = menuView.appearance
+                menuWindow.contentView = menuView
+                menuWindow.makeKeyAndOrderFront(nil)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+                menuWindow.layoutIfNeeded()
+                menuView.layoutSubtreeIfNeeded()
+                menuView.displayIfNeeded()
+                let name = "menu-panel-\(style.rawValue)\(dark ? "-dark" : "").png"
+                try render(menuView, size: menuSize, to: outputDirectory.appendingPathComponent(name))
+                menuWindow.orderOut(nil)
+            }
+        }
     }
 
     private func previewDirectory() -> URL {

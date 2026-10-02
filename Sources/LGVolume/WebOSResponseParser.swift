@@ -40,7 +40,8 @@ enum WebOSResponseParser {
                 label: (device["label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id,
                 appID: device["appId"] as? String ?? "",
                 port: port,
-                connected: device["connected"] as? Bool
+                connected: device["connected"] as? Bool,
+                iconName: (device["icon"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             )
         }
     }

@@ -30,6 +30,7 @@ final class AppSettings {
         static let macHDMIPortOverride = "macHDMIPortOverride"
         static let lastDetectedMacHDMIPort = "lastDetectedMacHDMIPort"
         static let pairingGrantsPower = "pairingGrantsPower"
+        static let menuStyle = "menuStyle"
     }
 
     var tvIP: String {
@@ -182,6 +183,11 @@ final class AppSettings {
     var pairingGrantsPower: Bool {
         get { defaults.bool(forKey: Key.pairingGrantsPower) }
         set { defaults.set(newValue, forKey: Key.pairingGrantsPower) }
+    }
+
+    var menuStyle: MenuPanelStyle {
+        get { defaults.string(forKey: Key.menuStyle).flatMap(MenuPanelStyle.init(rawValue:)) ?? .defaultStyle }
+        set { defaults.set(newValue.rawValue, forKey: Key.menuStyle) }
     }
 
     private func migratePreferencesTokenIfNeeded() {

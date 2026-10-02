@@ -19,7 +19,7 @@ LGVolume 通过 LG webOS 局域网 API，让 Apple Silicon Mac 可以在菜单�
 
 ### 当前版本
 
-- 版本：`0.2.0`
+- 版本：`1.1.0`
 - 架构：Apple Silicon / arm64
 - 系统：macOS 14 或更高版本
 - 电视：支持局域网控制的 LG webOS 电视
@@ -141,7 +141,7 @@ LGVolume uses the local LG webOS API to show TV volume, toggle mute, switch HDMI
 
 ### Current Version
 
-- Version: `0.2.0`
+- Version: `1.1.0`
 - Architecture: Apple Silicon / arm64
 - System: macOS 14 or later
 - TV: LG webOS TV with local-network control support

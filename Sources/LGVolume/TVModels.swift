@@ -6,6 +6,8 @@ struct TVExternalInput: Identifiable, Equatable {
     let appID: String
     let port: Int?
     let connected: Bool?
+    /// The icon file the TV uses for this input (for example "gameconsole.png"), if reported.
+    var iconName: String? = nil
 
     var hdmiIndex: Int? {
         if let port, (1...4).contains(port) {

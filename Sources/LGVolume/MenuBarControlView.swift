@@ -1,6 +1,29 @@
 import SwiftUI
 
+/// The menu bar panel; the layout follows the style chosen in Preferences.
 struct MenuBarControlView: View {
+    @ObservedObject var coordinator: AppCoordinator
+
+    var body: some View {
+        switch coordinator.menuStyle {
+        case .cards:
+            CardsMenuPanel(coordinator: coordinator)
+        case .native:
+            NativeMenuPanel(coordinator: coordinator)
+        case .controlCenter:
+            ControlCenterMenuPanel(coordinator: coordinator)
+        case .compact:
+            CompactMenuPanel(coordinator: coordinator)
+        case .remote:
+            RemoteMenuPanel(coordinator: coordinator)
+        case .classic:
+            ClassicMenuPanel(coordinator: coordinator)
+        }
+    }
+}
+
+/// The 1.0 layout, kept as a selectable style.
+struct ClassicMenuPanel: View {
     @ObservedObject var coordinator: AppCoordinator
     @State private var draggingVolume: Double?
     @State private var isEditingVolume = false
