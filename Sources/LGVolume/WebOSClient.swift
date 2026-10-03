@@ -320,6 +320,16 @@ final class WebOSClient: NSObject {
         }
     }
 
+    /// Turns only the screen off; the TV stays on. Not every model or pairing allows it.
+    func turnOffScreen(completion: @escaping (LGResult<Void>) -> Void) {
+        request(
+            uri: "ssap://com.webos.service.tvpower/power/turnOffScreen",
+            payload: ["standbyMode": "active"]
+        ) { response in
+            completion(self.resultFromResponse(response))
+        }
+    }
+
     func getForegroundAppID(completion: @escaping (LGResult<String>) -> Void) {
         request(uri: "ssap://com.webos.applicationManager/getForegroundAppInfo", payload: [:]) { response in
             completion(self.foregroundAppResult(from: response))

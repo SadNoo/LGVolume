@@ -19,6 +19,9 @@ final class KeyboardVolumeMonitor: @unchecked Sendable {
     private var lastHDMITriggerTime = Date.distantPast
     private var lastVolumeTrigger: (action: VolumeAction, time: Date)?
     private var isStarted = false
+    /// Off while the Mac's sound goes somewhere other than the TV: F10-F12 and the media volume
+    /// keys are then left to macOS.
+    private var volumeKeysEnabled = true
     private let onVolumeDown: @MainActor () -> Void
     private let onVolumeUp: @MainActor () -> Void
     private let onMute: @MainActor () -> Void
@@ -48,9 +51,27 @@ final class KeyboardVolumeMonitor: @unchecked Sendable {
         }
         isStarted = true
         installHotKeyHandler()
-        registerVolumeHotKeys()
+        if volumeKeysEnabled {
+            registerVolumeHotKeys()
+        } else {
+            volumeRegistrationStates = Array(repeating: true, count: 3)
+        }
         updateHDMIShortcuts(hdmiShortcuts())
         installVolumeEventMonitors()
+    }
+
+    func setVolumeKeysEnabled(_ enabled: Bool) {
+        guard enabled != volumeKeysEnabled else { return }
+        volumeKeysEnabled = enabled
+        guard isStarted else { return }
+        if enabled {
+            registerVolumeHotKeys()
+        } else {
+            unregisterVolumeHotKeys()
+            // Released on purpose, not a registration failure.
+            volumeRegistrationStates = Array(repeating: true, count: 3)
+        }
+        reportShortcutRegistrationStates()
     }
 
     func updateHDMIShortcuts(_ shortcuts: [KeyboardShortcut?]) {
@@ -184,6 +205,9 @@ final class KeyboardVolumeMonitor: @unchecked Sendable {
     }
 
     private func handleVolumeEvent(_ event: NSEvent) -> Bool {
+        guard volumeKeysEnabled else {
+            return false
+        }
         if event.type == .systemDefined {
             return handleMediaKey(event)
         }

@@ -1,3 +1,4 @@
+import CoreAudio
 import XCTest
 @testable import LGVolume
 
@@ -114,5 +115,25 @@ final class DisplayOffStandbyGateTests: XCTestCase {
         gate.displaysDidSleep()
         clock.elapse()
         XCTAssertEqual(fired, 0, "still the same off period; wake first to start again")
+    }
+}
+
+final class VolumeKeysAndStandbyActionTests: XCTestCase {
+    func testTVAudioIsRecognisedByTransportOrName() {
+        XCTAssertTrue(AudioOutputMonitor.isTVOutput(name: "LG TV SSCR2", transport: kAudioDeviceTransportTypeDisplayPort))
+        XCTAssertTrue(AudioOutputMonitor.isTVOutput(name: "Television", transport: kAudioDeviceTransportTypeHDMI))
+        XCTAssertTrue(AudioOutputMonitor.isTVOutput(name: "LG TV", transport: 0))
+        XCTAssertFalse(AudioOutputMonitor.isTVOutput(name: "AirPods Pro", transport: kAudioDeviceTransportTypeBluetooth))
+        XCTAssertFalse(AudioOutputMonitor.isTVOutput(name: "Mac mini Speakers", transport: kAudioDeviceTransportTypeBuiltIn))
+        XCTAssertFalse(AudioOutputMonitor.isTVOutput(name: "USB Audio DAC", transport: kAudioDeviceTransportTypeUSB))
+    }
+
+    func testDefaultsKeepCurrentBehaviourSafe() {
+        let defaults = UserDefaults(suiteName: "LGVolumeKeysTests-\(UUID().uuidString)")!
+        let settings = AppSettings(defaults: defaults, tokenStore: MemoryPairingTokenStore())
+        XCTAssertTrue(settings.volumeKeysOnlyForTVAudio)
+        XCTAssertEqual(settings.standbyAction, .powerOff)
+        settings.standbyAction = .screenOff
+        XCTAssertEqual(settings.standbyAction, .screenOff)
     }
 }

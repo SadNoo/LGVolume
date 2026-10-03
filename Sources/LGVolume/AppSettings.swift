@@ -32,6 +32,8 @@ final class AppSettings {
         static let pairingGrantsPower = "pairingGrantsPower"
         static let menuStyle = "menuStyle"
         static let deviceKindMode = "deviceKindMode"
+        static let volumeKeysOnlyForTVAudio = "volumeKeysOnlyForTVAudio"
+        static let standbyAction = "standbyAction"
     }
 
     var tvIP: String {
@@ -189,6 +191,17 @@ final class AppSettings {
     var deviceKindMode: DeviceKindMode {
         get { defaults.string(forKey: Key.deviceKindMode).flatMap(DeviceKindMode.init(rawValue:)) ?? .defaultMode }
         set { defaults.set(newValue.rawValue, forKey: Key.deviceKindMode) }
+    }
+
+    /// F10-F12 and the media volume keys control the TV only while the Mac's sound goes to it.
+    var volumeKeysOnlyForTVAudio: Bool {
+        get { defaults.object(forKey: Key.volumeKeysOnlyForTVAudio) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.volumeKeysOnlyForTVAudio) }
+    }
+
+    var standbyAction: StandbyAction {
+        get { defaults.string(forKey: Key.standbyAction).flatMap(StandbyAction.init(rawValue:)) ?? .powerOff }
+        set { defaults.set(newValue.rawValue, forKey: Key.standbyAction) }
     }
 
     var menuStyle: MenuPanelStyle {

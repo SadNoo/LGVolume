@@ -8,6 +8,12 @@ enum DeviceKind: String {
     case monitor
 }
 
+/// What "turn off the TV" does: power it off, or only turn its screen off (instant back on).
+enum StandbyAction: String, CaseIterable {
+    case powerOff
+    case screenOff
+}
+
 /// The user's choice in Settings: follow what macOS reports, or force one kind.
 enum DeviceKindMode: String, CaseIterable {
     case auto

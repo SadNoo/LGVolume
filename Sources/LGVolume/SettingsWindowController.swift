@@ -87,6 +87,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private let macInputPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let menuStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let deviceKindPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let standbyActionPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let testStandbyButton = NSButton(title: "", target: nil, action: nil)
+    private let volumeKeysOnlyTVButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let detectedInputNamesLabel = NSTextField(labelWithString: "")
     private let ipField = NSTextField()
     private let nameField = NSTextField()
@@ -169,6 +172,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         secureConnectionButton.title = t(.secureConnectionOnly)
         useTVInputNamesButton.title = t(.useTVInputNames)
         sleepTVButton.title = t(.sleepTVWithMac)
+        testStandbyButton.title = t(.testStandby)
+        volumeKeysOnlyTVButton.title = t(.volumeKeysOnlyTV)
         ipField.placeholderString = t(.inputIP)
         volumeTitleLabel.stringValue = formLabelText(t(.volume))
         shortcutStateLabel.stringValue = t(.shortcutsEnabled)
@@ -220,8 +225,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
 
     func updateShortcutStatus() {
         let shortcutsAvailable = coordinator?.shortcutRegistrationStates.allSatisfy { $0 } == true
-        shortcutStateLabel.stringValue = t(shortcutsAvailable ? .shortcutsEnabled : .shortcutsUnavailable)
-        shortcutStateLabel.textColor = shortcutsAvailable ? .secondaryLabelColor : .systemOrange
+        let volumeKeysPaused = coordinator?.volumeKeysOnlyForTVAudio == true && coordinator?.macAudioGoesToTV == false
+        if volumeKeysPaused && shortcutsAvailable {
+            shortcutStateLabel.stringValue = t(.volumeKeysPaused)
+            shortcutStateLabel.textColor = .secondaryLabelColor
+        } else {
+            shortcutStateLabel.stringValue = t(shortcutsAvailable ? .shortcutsEnabled : .shortcutsUnavailable)
+            shortcutStateLabel.textColor = shortcutsAvailable ? .secondaryLabelColor : .systemOrange
+        }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -376,6 +387,18 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         powerHelpLabel.font = .systemFont(ofSize: 12)
         powerHelpLabel.preferredMaxLayoutWidth = 420
         powerHelpLabel.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        standbyActionPopup.identifier = NSUserInterfaceItemIdentifier("settings.standbyAction")
+        standbyActionPopup.target = self
+        standbyActionPopup.action = #selector(changeStandbyAction)
+        standbyActionPopup.font = Self.formFont
+        standbyActionPopup.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        testStandbyButton.identifier = NSUserInterfaceItemIdentifier("settings.testStandby")
+        testStandbyButton.target = self
+        testStandbyButton.action = #selector(testStandby)
+        testStandbyButton.bezelStyle = .rounded
+        volumeKeysOnlyTVButton.identifier = NSUserInterfaceItemIdentifier("settings.volumeKeysOnlyTV")
+        volumeKeysOnlyTVButton.target = self
+        volumeKeysOnlyTVButton.action = #selector(changeVolumeKeysOnlyTV)
         deviceKindPopup.identifier = NSUserInterfaceItemIdentifier("settings.deviceKind")
         deviceKindPopup.target = self
         deviceKindPopup.action = #selector(changeDeviceKind)
@@ -583,6 +606,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             (fixedLabel(.connection), secureConnectionButton),
             (fixedLabel(.deviceKind), deviceKindPopup),
             (fixedLabel(.power), sleepTVButton),
+            (fixedLabel(.standbyActionLabel), standbyActionRow()),
             (nil, powerHelpLabel),
             (fixedLabel(.diagnostics), diagnosticsButton)
         ]))
@@ -628,6 +652,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         stack.addArrangedSubview(pageSeparatorLine())
 
         stack.addArrangedSubview(formGrid([
+            (fixedLabel(.volumeKeys), volumeKeysOnlyTVButton),
             (fixedLabel(.hdmiShortcut1), hdmiShortcutFields[0]),
             (fixedLabel(.hdmiShortcut2), hdmiShortcutFields[1]),
             (fixedLabel(.hdmiShortcut3), hdmiShortcutFields[2]),
@@ -851,6 +876,25 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         menuStylePopup.selectItem(at: MenuPanelStyle.allCases.firstIndex(of: style) ?? 0)
     }
 
+    private func standbyActionRow() -> NSView {
+        let stack = row(spacing: 10)
+        stack.addArrangedSubview(standbyActionPopup)
+        stack.addArrangedSubview(testStandbyButton)
+        return stack
+    }
+
+    private func updateStandbyActionSelection() {
+        guard let coordinator else { return }
+        let titles = [t(.standbyActionPowerOff), t(.standbyActionScreenOff)]
+        if standbyActionPopup.itemTitles != titles {
+            standbyActionPopup.removeAllItems()
+            standbyActionPopup.addItems(withTitles: titles)
+        }
+        standbyActionPopup.selectItem(at: StandbyAction.allCases.firstIndex(of: coordinator.standbyAction) ?? 0)
+        volumeKeysOnlyTVButton.state = coordinator.volumeKeysOnlyForTVAudio ? .on : .off
+        volumeKeysOnlyTVButton.toolTip = coordinator.macAudioOutputName.isEmpty ? nil : coordinator.macAudioOutputName
+    }
+
     private func updateDeviceKindSelection() {
         guard let coordinator else { return }
         let detected: String
@@ -893,6 +937,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             powerHelpLabel.textColor = .secondaryLabelColor
         }
         updateDeviceKindSelection()
+        updateStandbyActionSelection()
         macInputPopup.toolTip = detected == nil ? t(.macInputNotDetected) : nil
     }
 
@@ -946,6 +991,36 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         guard styles.indices.contains(index) else { return }
         coordinator?.setMenuStyle(styles[index])
         showSaveFeedback()
+    }
+
+    @objc private func changeStandbyAction() {
+        let actions = StandbyAction.allCases
+        let index = standbyActionPopup.indexOfSelectedItem
+        guard actions.indices.contains(index) else { return }
+        coordinator?.setStandbyAction(actions[index])
+        showSaveFeedback()
+    }
+
+    @objc private func changeVolumeKeysOnlyTV() {
+        coordinator?.setVolumeKeysOnlyForTVAudio(volumeKeysOnlyTVButton.state == .on)
+        showSaveFeedback()
+    }
+
+    @objc private func testStandby() {
+        testStandbyButton.isEnabled = false
+        coordinator?.simulateTVStandby { [weak self] message in
+            guard let self else { return }
+            self.testStandbyButton.isEnabled = true
+            let alert = NSAlert()
+            alert.messageText = self.t(.testResultTitle)
+            alert.informativeText = message
+            alert.addButton(withTitle: self.t(.ok))
+            if let window = self.window {
+                alert.beginSheetModal(for: window)
+            } else {
+                alert.runModal()
+            }
+        }
     }
 
     @objc private func changeDeviceKind() {

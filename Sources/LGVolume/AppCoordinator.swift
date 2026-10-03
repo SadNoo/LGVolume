@@ -55,6 +55,9 @@ final class AppCoordinator: ObservableObject {
         }
     )
     private var screenLockObservers: [NSObjectProtocol] = []
+    private lazy var audioOutputMonitor = AudioOutputMonitor { [weak self] _ in
+        self?.applyVolumeKeyTakeover()
+    }
     /// TV mode: the check scheduled after a lock; cancelled when the Mac is unlocked first.
     private var lockStandbyWorkItem: DispatchWorkItem?
     /// When the TV last switched to the Mac's input (nil while it shows another input).
@@ -171,6 +174,8 @@ final class AppCoordinator: ObservableObject {
         restoreLaunchAtLoginIfNeeded()
         applyAppearance()
         syncMenuState()
+        audioOutputMonitor.start()
+        applyVolumeKeyTakeover()
         keyboardVolumeMonitor.start()
         refreshMacHDMIPort()
         screenParametersObserver = NotificationCenter.default.addObserver(
@@ -885,6 +890,31 @@ final class AppCoordinator: ObservableObject {
     }
 
     var deviceKindMode: DeviceKindMode { settings.deviceKindMode }
+    var standbyAction: StandbyAction { settings.standbyAction }
+    var volumeKeysOnlyForTVAudio: Bool { settings.volumeKeysOnlyForTVAudio }
+    var macAudioOutputName: String { audioOutputMonitor.outputName }
+    var macAudioGoesToTV: Bool { audioOutputMonitor.isTVOutput }
+
+    func setStandbyAction(_ action: StandbyAction) {
+        settings.standbyAction = action
+        logger.log("power", "standby action=\(action.rawValue)")
+        settingsWindowController?.refresh()
+    }
+
+    func setVolumeKeysOnlyForTVAudio(_ enabled: Bool) {
+        settings.volumeKeysOnlyForTVAudio = enabled
+        applyVolumeKeyTakeover()
+        settingsWindowController?.refresh()
+    }
+
+    /// F10-F12 and the media volume keys go to the TV only while the Mac's sound goes to it,
+    /// unless the user chose to always control the TV.
+    private func applyVolumeKeyTakeover() {
+        let enabled = !settings.volumeKeysOnlyForTVAudio || audioOutputMonitor.isTVOutput
+        keyboardVolumeMonitor.setVolumeKeysEnabled(enabled)
+        logger.log("keys", "volume keys control TV=\(enabled) output=\(audioOutputMonitor.isTVOutput ? "TV" : "other")")
+        settingsWindowController?.updateShortcutStatus()
+    }
 
     /// Manual choice first; otherwise what macOS reports; an unknown device is treated as a TV
     /// because TV mode never acts on picture interruptions.
@@ -905,8 +935,8 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func refreshDeviceKind() {
-        DeviceKindDetector.detect { kind in
-            Task { @MainActor [weak self] in
+        DeviceKindDetector.detect { [weak self] kind in
+            Task { @MainActor in
                 guard let self, kind != self.detectedDeviceKind else { return }
                 self.detectedDeviceKind = kind
                 self.logger.log("power", "device kind detected=\(kind?.rawValue ?? "unknown")")
@@ -1039,18 +1069,73 @@ final class AppCoordinator: ObservableObject {
                     }
                     return done()
                 }
-                self.logger.log("power", "\(trigger): TV shows the Mac input, turning it off")
-                self.webOSClient.turnOff { [weak self] result in
-                    DispatchQueue.main.async {
-                        if case .failure(let message) = result {
-                            self?.logger.log("power", "\(trigger): turn off failed: \(message)")
-                            if self?.isPermissionError(message) == true {
-                                self?.settings.pairingGrantsPower = false
-                            }
+                self.performStandbyAction(trigger: trigger, done: done)
+            }
+        }
+    }
+
+    /// Powers the TV off, or turns only its screen off when chosen. If the TV refuses the
+    /// screen-off command, it is powered off instead so it never stays on by mistake.
+    private func performStandbyAction(trigger: String, done: @escaping @MainActor () -> Void) {
+        let powerOff: () -> Void = { [weak self] in
+            guard let self else { return done() }
+            self.logger.log("power", "\(trigger): TV shows the Mac input, turning it off")
+            self.webOSClient.turnOff { [weak self] result in
+                DispatchQueue.main.async {
+                    if case .failure(let message) = result {
+                        self?.logger.log("power", "\(trigger): turn off failed: \(message)")
+                        if self?.isPermissionError(message) == true {
+                            self?.settings.pairingGrantsPower = false
                         }
-                        done()
                     }
+                    done()
                 }
+            }
+        }
+        guard settings.standbyAction == .screenOff else {
+            return powerOff()
+        }
+        logger.log("power", "\(trigger): TV shows the Mac input, turning its screen off")
+        webOSClient.turnOffScreen { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return done() }
+                if case .failure(let message) = result {
+                    self.logger.log("power", "\(trigger): screen off refused (\(message)), powering off instead")
+                    powerOff()
+                } else {
+                    done()
+                }
+            }
+        }
+    }
+
+    /// Settings "Test" button: runs the same checks as a real trigger right now and describes
+    /// the outcome, without sending any power command to the TV.
+    func simulateTVStandby(completion: @escaping (String) -> Void) {
+        let kind = effectiveDeviceKind
+        let action = settings.standbyAction == .screenOff ? text(.testActionScreenOff) : text(.testActionPowerOff)
+        logger.log("power", "test: simulating (\(kind.rawValue), \(settings.standbyAction.rawValue)), nothing is sent")
+        guard settings.sleepTVWithMac else { return completion(text(.testNotOn)) }
+        guard webOSClient.isConnected else { return completion(text(.testNotConnected)) }
+        guard let macPort = effectiveMacHDMIPort else { return completion(text(.testNoMacPort)) }
+        webOSClient.getForegroundAppID { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard case .success(let appID) = result else {
+                    return completion(self.text(.testReadFailed))
+                }
+                let port = TVSleepPolicy.hdmiPort(forForegroundAppID: appID, inputs: self.externalInputs)
+                guard port == macPort else {
+                    let shown = port.flatMap { index in
+                        self.menuHDMINames.indices.contains(index - 1) ? "HDMI\(index)（\(self.menuHDMINames[index - 1])）" : "HDMI\(index)"
+                    } ?? (appID.isEmpty ? "?" : appID)
+                    return completion(String(format: self.text(.testOtherInput), shown, macPort))
+                }
+                if kind == .tv, !TVSleepPolicy.macInputIsStable(since: self.macInputSince) {
+                    let held = self.macInputSince.map { Int(Date().timeIntervalSince($0)) } ?? 0
+                    return completion(String(format: self.text(.testNotStable), held))
+                }
+                completion(String(format: self.text(kind == .tv ? .testWouldTurnOffTV : .testWouldTurnOffMonitor), action))
             }
         }
     }
