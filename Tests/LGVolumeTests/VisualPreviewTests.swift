@@ -24,7 +24,7 @@ final class VisualPreviewTests: XCTestCase {
 
         let settingsWindow = try XCTUnwrap(settingsController.window)
         let settingsView = try XCTUnwrap(settingsWindow.contentView)
-        let settingsSize = NSSize(width: 840, height: 480)
+        let settingsSize = NSSize(width: 840, height: 560)
         settingsWindow.appearance = NSAppearance(named: .aqua)
         settingsView.frame.size = settingsSize
         settingsWindow.layoutIfNeeded()

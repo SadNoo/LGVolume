@@ -86,6 +86,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private let powerHelpLabel = NSTextField(wrappingLabelWithString: "")
     private let macInputPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let menuStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let deviceKindPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let detectedInputNamesLabel = NSTextField(labelWithString: "")
     private let ipField = NSTextField()
     private let nameField = NSTextField()
@@ -106,13 +107,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         self.settings = settings
         self.coordinator = coordinator
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 840, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 840, height: 560),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         window.title = "LGVolume \(L10n.text(.settings, languageMode: settings.languageMode))"
-        window.minSize = NSSize(width: 760, height: 440)
+        window.minSize = NSSize(width: 760, height: 520)
         window.center()
         super.init(window: window)
         configureControls()
@@ -375,6 +376,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         powerHelpLabel.font = .systemFont(ofSize: 12)
         powerHelpLabel.preferredMaxLayoutWidth = 420
         powerHelpLabel.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        deviceKindPopup.identifier = NSUserInterfaceItemIdentifier("settings.deviceKind")
+        deviceKindPopup.target = self
+        deviceKindPopup.action = #selector(changeDeviceKind)
+        deviceKindPopup.font = Self.formFont
+        deviceKindPopup.widthAnchor.constraint(equalToConstant: 300).isActive = true
         menuStylePopup.identifier = NSUserInterfaceItemIdentifier("settings.menuStyle")
         menuStylePopup.target = self
         menuStylePopup.action = #selector(changeMenuStyle)
@@ -575,6 +581,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             (fixedLabel(.language), languageControl),
             (fixedLabel(.launch), launchAtLoginButton),
             (fixedLabel(.connection), secureConnectionButton),
+            (fixedLabel(.deviceKind), deviceKindPopup),
             (fixedLabel(.power), sleepTVButton),
             (nil, powerHelpLabel),
             (fixedLabel(.diagnostics), diagnosticsButton)
@@ -844,6 +851,22 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         menuStylePopup.selectItem(at: MenuPanelStyle.allCases.firstIndex(of: style) ?? 0)
     }
 
+    private func updateDeviceKindSelection() {
+        guard let coordinator else { return }
+        let detected: String
+        switch coordinator.detectedDeviceKind {
+        case .tv: detected = t(.deviceKindTV)
+        case .monitor: detected = t(.deviceKindMonitor)
+        case nil: detected = t(.deviceKindUnknown)
+        }
+        let titles = ["\(t(.deviceKindAuto))（\(detected)）", t(.deviceKindTV), t(.deviceKindMonitor)]
+        if deviceKindPopup.itemTitles != titles {
+            deviceKindPopup.removeAllItems()
+            deviceKindPopup.addItems(withTitles: titles)
+        }
+        deviceKindPopup.selectItem(at: DeviceKindMode.allCases.firstIndex(of: coordinator.deviceKindMode) ?? 0)
+    }
+
     private func updatePowerControls() {
         guard let coordinator else { return }
         sleepTVButton.state = coordinator.sleepTVWithMac ? .on : .off
@@ -864,9 +887,12 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             powerHelpLabel.stringValue = t(.macInputNotDetected)
             powerHelpLabel.textColor = .systemOrange
         } else {
-            powerHelpLabel.stringValue = t(.sleepTVWithMacHelp)
+            powerHelpLabel.stringValue = coordinator.effectiveDeviceKind == .monitor
+                ? t(.sleepTVWithMacMonitorHelp)
+                : t(.sleepTVWithMacHelp)
             powerHelpLabel.textColor = .secondaryLabelColor
         }
+        updateDeviceKindSelection()
         macInputPopup.toolTip = detected == nil ? t(.macInputNotDetected) : nil
     }
 
@@ -919,6 +945,15 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         let index = menuStylePopup.indexOfSelectedItem
         guard styles.indices.contains(index) else { return }
         coordinator?.setMenuStyle(styles[index])
+        showSaveFeedback()
+    }
+
+    @objc private func changeDeviceKind() {
+        let modes = DeviceKindMode.allCases
+        let index = deviceKindPopup.indexOfSelectedItem
+        guard modes.indices.contains(index) else { return }
+        coordinator?.setDeviceKindMode(modes[index])
+        updatePowerControls()
         showSaveFeedback()
     }
 
@@ -1022,7 +1057,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private static let labelColumnWidth: CGFloat = 120
     private static let formRowHeight: CGFloat = 30
     private static let secondaryRowHeight: CGFloat = 20
-    private static let helpRowHeight: CGFloat = 50
+    private static let helpRowHeight: CGFloat = 66
     private static let formControlHeight: CGFloat = 28
     private static let sidebarWidth: CGFloat = 176
 }

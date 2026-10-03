@@ -31,6 +31,7 @@ final class AppSettings {
         static let lastDetectedMacHDMIPort = "lastDetectedMacHDMIPort"
         static let pairingGrantsPower = "pairingGrantsPower"
         static let menuStyle = "menuStyle"
+        static let deviceKindMode = "deviceKindMode"
     }
 
     var tvIP: String {
@@ -183,6 +184,11 @@ final class AppSettings {
     var pairingGrantsPower: Bool {
         get { defaults.bool(forKey: Key.pairingGrantsPower) }
         set { defaults.set(newValue, forKey: Key.pairingGrantsPower) }
+    }
+
+    var deviceKindMode: DeviceKindMode {
+        get { defaults.string(forKey: Key.deviceKindMode).flatMap(DeviceKindMode.init(rawValue:)) ?? .defaultMode }
+        set { defaults.set(newValue.rawValue, forKey: Key.deviceKindMode) }
     }
 
     var menuStyle: MenuPanelStyle {

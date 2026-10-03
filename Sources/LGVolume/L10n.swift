@@ -99,6 +99,12 @@ enum L10n {
         case sleepTVWithMacHelp
         case powerPermissionNeedsRepair
         case openLoginItems
+        case sleepTVWithMacMonitorHelp
+        case deviceKind
+        case deviceKindAuto
+        case deviceKindTV
+        case deviceKindMonitor
+        case deviceKindUnknown
         case ok
         case menuStyle
         case menuStyleCards
@@ -246,8 +252,8 @@ enum L10n {
         .macInputAuto: "自动识别",
         .macInputNotDetected: "未识别到 Mac 连接的 LG 电视 HDMI 口。",
         .power: "电源：",
-        .sleepTVWithMac: "Mac 睡眠时让电视待机",
-        .sleepTVWithMacHelp: "仅当电视正在显示 Mac 所在的 HDMI 输入时才会待机；正在使用其他输入（如 Switch 2）或无法确认时不做任何操作。",
+        .sleepTVWithMac: "Mac 休眠时关闭 LG 电视",
+        .sleepTVWithMacHelp: "电视模式：触控 ID 锁屏 10 秒后，如果电视仍开着、且已在 Mac 的 HDMI 输入上停留至少 1 分钟，就关机（10 秒内解锁则取消）；Mac 系统睡眠时同样处理。电视在其他输入（如 Switch 2）上时不做任何操作。",
         .powerPermissionNeedsRepair: "需要在“通用”中点击“重新配对”，并在电视上确认，才能授予待机权限。",
         .menuStyle: "菜单样式：",
         .menuStyleCards: "输入源卡片",
@@ -262,12 +268,18 @@ enum L10n {
         .reconnect: "重新连接",
         .settingsEllipsis: "设置…",
         .quitApp: "退出 LGVolume",
-        .sleepTVShort: "随 Mac 睡眠待机",
+        .sleepTVShort: "随 Mac 关电视",
         .needsRepairShort: "需重新配对",
         .connecting: "正在连接…",
         .notConnectedTV: "未连接到电视",
         .openLoginItems: "打开“登录项”设置",
         .ok: "好",
+        .sleepTVWithMacMonitorHelp: "显示器模式：Mac 停止输出画面满 1 分钟，或 Mac 系统睡眠时，如果仍在 Mac 的输入上，就关机。会切换到其他输入时请选“电视”。",
+        .deviceKind: "设备类型：",
+        .deviceKindAuto: "自动识别",
+        .deviceKindTV: "电视",
+        .deviceKindMonitor: "显示器",
+        .deviceKindUnknown: "未识别，按电视处理",
     ]
 
     private static let english: [Key: String] = [
@@ -364,8 +376,8 @@ enum L10n {
         .macInputAuto: "Automatic",
         .macInputNotDetected: "No LG TV HDMI port detected for this Mac.",
         .power: "Power:",
-        .sleepTVWithMac: "Put the TV in standby when the Mac sleeps",
-        .sleepTVWithMacHelp: "Only when the TV is showing the Mac’s HDMI input. Nothing happens while another input (such as Switch 2) is shown or when the input cannot be confirmed.",
+        .sleepTVWithMac: "Turn off the LG TV when the Mac sleeps",
+        .sleepTVWithMacHelp: "TV mode: 10 s after you lock the Mac (Touch ID key), if the TV is still on and has stayed on the Mac’s HDMI input for at least 1 minute, it turns off (unlocking within 10 s cancels). The same applies when the Mac sleeps. Nothing happens while the TV shows another input (such as Switch 2).",
         .powerPermissionNeedsRepair: "Click Re-pair in General and accept on the TV to grant the standby permission.",
         .menuStyle: "Menu style:",
         .menuStyleCards: "Input Cards",
@@ -380,12 +392,18 @@ enum L10n {
         .reconnect: "Reconnect",
         .settingsEllipsis: "Settings…",
         .quitApp: "Quit LGVolume",
-        .sleepTVShort: "Standby with Mac",
+        .sleepTVShort: "Turn off TV with Mac",
         .needsRepairShort: "Re-pair needed",
         .connecting: "Connecting…",
         .notConnectedTV: "Not connected to the TV",
         .openLoginItems: "Open Login Items",
         .ok: "OK",
+        .sleepTVWithMacMonitorHelp: "Monitor mode: when the Mac stops sending a picture for 1 minute, or goes to sleep, and the Mac’s input is still shown, it turns off. If you switch to other inputs, choose TV.",
+        .deviceKind: "Device type:",
+        .deviceKindAuto: "Automatic",
+        .deviceKindTV: "TV",
+        .deviceKindMonitor: "Monitor",
+        .deviceKindUnknown: "unknown, treated as TV",
     ]
 
     private static let japanese: [Key: String] = [
@@ -482,8 +500,8 @@ enum L10n {
         .macInputAuto: "自動検出",
         .macInputNotDetected: "この Mac が接続されている LG テレビの HDMI 端子を検出できません。",
         .power: "電源：",
-        .sleepTVWithMac: "Mac のスリープ時にテレビをスタンバイにする",
-        .sleepTVWithMacHelp: "テレビが Mac の HDMI 入力を表示している場合のみ実行します。他の入力（Switch 2 など）を表示中、または確認できない場合は何もしません。",
+        .sleepTVWithMac: "Mac のスリープ時に LG テレビの電源を切る",
+        .sleepTVWithMacHelp: "テレビモード：Touch ID キーでロックして 10 秒後、テレビがまだオンで、Mac の HDMI 入力に 1 分以上とどまっていれば電源を切ります（10 秒以内に解除すると取り消し）。Mac のスリープ時も同様です。他の入力（Switch 2 など）を表示中は何もしません。",
         .powerPermissionNeedsRepair: "「一般」で「再ペアリング」をクリックし、テレビで許可するとスタンバイ権限が付与されます。",
         .menuStyle: "メニューのスタイル：",
         .menuStyleCards: "入力カード",
@@ -498,11 +516,17 @@ enum L10n {
         .reconnect: "再接続",
         .settingsEllipsis: "設定…",
         .quitApp: "LGVolume を終了",
-        .sleepTVShort: "Mac と一緒にスタンバイ",
+        .sleepTVShort: "Mac と一緒に電源オフ",
         .needsRepairShort: "再ペアリングが必要",
         .connecting: "接続中…",
         .notConnectedTV: "テレビに接続されていません",
         .openLoginItems: "“ログイン項目”を開く",
         .ok: "OK",
+        .sleepTVWithMacMonitorHelp: "モニターモード：Mac の映像出力が 1 分間止まったとき、または Mac のスリープ時に、Mac の入力のままなら電源を切ります。他の入力に切り替える場合は「テレビ」を選んでください。",
+        .deviceKind: "デバイスの種類：",
+        .deviceKindAuto: "自動検出",
+        .deviceKindTV: "テレビ",
+        .deviceKindMonitor: "モニター",
+        .deviceKindUnknown: "不明（テレビとして扱う）",
     ]
 }

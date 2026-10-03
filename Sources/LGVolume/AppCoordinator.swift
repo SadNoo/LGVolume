@@ -45,6 +45,20 @@ final class AppCoordinator: ObservableObject {
         }
     )
     private var screenParametersObserver: NSObjectProtocol?
+    private var displaySleepObservers: [NSObjectProtocol] = []
+    /// "Mac mini went to sleep" on a Mac whose system sleep is disabled: the picture to the TV
+    /// stopped and stayed stopped (input-switch blips are filtered out by the gate).
+    private lazy var displayOffGate = DisplayOffStandbyGate(
+        log: { [weak self] message in self?.logger.log("power", message) },
+        onElapsed: { [weak self] in
+            self?.evaluateTVStandby(trigger: "monitor: picture off 60 s") {}
+        }
+    )
+    private var screenLockObservers: [NSObjectProtocol] = []
+    /// TV mode: the check scheduled after a lock; cancelled when the Mac is unlocked first.
+    private var lockStandbyWorkItem: DispatchWorkItem?
+    /// When the TV last switched to the Mac's input (nil while it shows another input).
+    private var macInputSince: Date?
     @Published private(set) var isConnecting = false
     private var pendingConnectionActions: [PendingConnectionAction] = []
     private var pendingVolumeWork: VolumeWork?
@@ -90,6 +104,8 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var soundOutputAvailable = false
     @Published private(set) var menuLanguageMode = "auto"
     @Published private(set) var menuStyle: MenuPanelStyle = .defaultStyle
+    /// What macOS reports the LG device to be; nil until read or when it cannot tell.
+    @Published private(set) var detectedDeviceKind: DeviceKind?
     /// The HDMI input read from the TV's EDID right now; nil while no LG TV EDID is visible.
     @Published private(set) var detectedMacHDMIPort: Int?
     @Published private(set) var shortcutRegistrationStates = Array(repeating: true, count: 7) {
@@ -164,9 +180,29 @@ final class AppCoordinator: ObservableObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.refreshMacHDMIPort()
+                self?.refreshDeviceKind()
             }
         }
         systemSleepMonitor.start()
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        displaySleepObservers = [
+            workspaceCenter.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.handleDisplaysDidSleep() }
+            },
+            workspaceCenter.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.displayOffGate.displaysDidWake() }
+            }
+        ]
+        let distributedCenter = DistributedNotificationCenter.default()
+        screenLockObservers = [
+            distributedCenter.addObserver(forName: NSNotification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.handleScreenLocked() }
+            },
+            distributedCenter.addObserver(forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.handleScreenUnlocked() }
+            }
+        ]
+        refreshDeviceKind()
         if !settings.tvIP.isEmpty {
             maintainConnection = true
             connect(showPairingPrompt: settings.clientKey.isEmpty)
@@ -251,6 +287,7 @@ final class AppCoordinator: ObservableObject {
             selectedHDMIIndex = nil
             externalInputs = []
             foregroundAppID = ""
+            macInputSince = nil
             currentSoundOutputID = ""
             soundOutputAvailable = false
             unsupportedSoundOutputIDs.removeAll()
@@ -771,6 +808,9 @@ final class AppCoordinator: ObservableObject {
         selectedHDMIIndex = nil
         currentSoundOutputID = ""
         soundOutputAvailable = false
+        // Forget the TV's input: after reconnecting, the time on the Mac input starts again.
+        foregroundAppID = ""
+        macInputSince = nil
         resetActiveCommands()
         status = text(.currentDisconnected)
         scheduleReconnect()
@@ -844,6 +884,83 @@ final class AppCoordinator: ObservableObject {
         return shortcuts.indices.contains(index - 1) ? shortcuts[index - 1]?.display : nil
     }
 
+    var deviceKindMode: DeviceKindMode { settings.deviceKindMode }
+
+    /// Manual choice first; otherwise what macOS reports; an unknown device is treated as a TV
+    /// because TV mode never acts on picture interruptions.
+    var effectiveDeviceKind: DeviceKind {
+        switch settings.deviceKindMode {
+        case .tv: return .tv
+        case .monitor: return .monitor
+        case .auto: return detectedDeviceKind ?? .tv
+        }
+    }
+
+    func setDeviceKindMode(_ mode: DeviceKindMode) {
+        settings.deviceKindMode = mode
+        displayOffGate.reset()
+        logger.log("power", "device kind mode=\(mode.rawValue) effective=\(effectiveDeviceKind.rawValue)")
+        objectWillChange.send()
+        settingsWindowController?.refresh()
+    }
+
+    private func refreshDeviceKind() {
+        DeviceKindDetector.detect { kind in
+            Task { @MainActor [weak self] in
+                guard let self, kind != self.detectedDeviceKind else { return }
+                self.detectedDeviceKind = kind
+                self.logger.log("power", "device kind detected=\(kind?.rawValue ?? "unknown")")
+                self.settingsWindowController?.refresh()
+            }
+        }
+    }
+
+    private func updateMacInputSince() {
+        let port = TVSleepPolicy.hdmiPort(forForegroundAppID: foregroundAppID, inputs: externalInputs)
+        if let port, port == effectiveMacHDMIPort {
+            if macInputSince == nil {
+                macInputSince = Date()
+            }
+        } else {
+            macInputSince = nil
+        }
+    }
+
+    /// TV mode trigger: the user locked the Mac (for example with the Touch ID key).
+    /// Waits first: when the Mac is still the TV's CEC source, CEC turns the TV off within that
+    /// time and the TV disconnects, so LGVolume only acts when CEC did not.
+    private func handleScreenLocked() {
+        guard effectiveDeviceKind == .tv else {
+            logger.log("power", "screen lock: monitor mode, lock is not a trigger")
+            return
+        }
+        lockStandbyWorkItem?.cancel()
+        logger.log("power", "tv: screen locked, checking the TV in \(Int(Self.lockStandbyDelay)) s")
+        let workItem = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.lockStandbyWorkItem = nil
+                self.evaluateTVStandby(trigger: "tv: screen lock", requireStableMacInput: true) {}
+            }
+        }
+        lockStandbyWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.lockStandbyDelay, execute: workItem)
+    }
+
+    private func handleScreenUnlocked() {
+        guard let workItem = lockStandbyWorkItem else { return }
+        workItem.cancel()
+        lockStandbyWorkItem = nil
+        logger.log("power", "tv: unlocked before the check, TV left on")
+    }
+
+    /// Monitor mode trigger: start the 60 s wait. In TV mode the picture going off is ignored,
+    /// because switching the TV's input causes exactly that.
+    private func handleDisplaysDidSleep() {
+        guard effectiveDeviceKind == .monitor else { return }
+        displayOffGate.displaysDidSleep()
+    }
+
     func setSleepTVWithMac(_ enabled: Bool) {
         settings.sleepTVWithMac = enabled
         objectWillChange.send()
@@ -872,9 +989,28 @@ final class AppCoordinator: ObservableObject {
     /// monitor also calls it after a timeout. The TV is only turned off when a fresh read shows
     /// it is displaying the Mac's input; every other case leaves the TV untouched.
     private func handleSystemWillSleep(done: @escaping @MainActor () -> Void) {
-        guard settings.sleepTVWithMac else { return done() }
+        displayOffGate.reset()
+        evaluateTVStandby(trigger: "system sleep", done: done)
+    }
+
+    /// Powers off the TV only when a fresh read shows it displaying the Mac's input.
+    /// `done` is called exactly once when the decision (and any command) has finished.
+    private func evaluateTVStandby(
+        trigger: String,
+        requireStableMacInput: Bool = false,
+        done: @escaping @MainActor () -> Void
+    ) {
+        guard settings.sleepTVWithMac else {
+            logger.log("power", "\(trigger): turn off TV with Mac is off")
+            return done()
+        }
         guard webOSClient.isConnected else {
-            logger.log("power", "sleep: TV not connected, leaving it alone")
+            logger.log("power", "\(trigger): TV not connected, leaving it alone")
+            return done()
+        }
+        if requireStableMacInput && !TVSleepPolicy.macInputIsStable(since: macInputSince) {
+            let held = macInputSince.map { "\(Int(Date().timeIntervalSince($0))) s" } ?? "not on the Mac input"
+            logger.log("power", "\(trigger): leaving TV on (Mac input held \(held), needs \(Int(TVSleepPolicy.requiredStableMacInput)) s)")
             return done()
         }
         let macPort = effectiveMacHDMIPort
@@ -899,15 +1035,15 @@ final class AppCoordinator: ObservableObject {
                 )
                 guard decision == .turnOff else {
                     if case .skip(let reason) = decision {
-                        self.logger.log("power", "sleep: leaving TV on (\(reason))")
+                        self.logger.log("power", "\(trigger): leaving TV on (\(reason))")
                     }
                     return done()
                 }
-                self.logger.log("power", "sleep: TV shows the Mac input, turning it off")
+                self.logger.log("power", "\(trigger): TV shows the Mac input, turning it off")
                 self.webOSClient.turnOff { [weak self] result in
                     DispatchQueue.main.async {
                         if case .failure(let message) = result {
-                            self?.logger.log("power", "sleep: turn off failed: \(message)")
+                            self?.logger.log("power", "\(trigger): turn off failed: \(message)")
                             if self?.isPermissionError(message) == true {
                                 self?.settings.pairingGrantsPower = false
                             }
@@ -1016,8 +1152,13 @@ final class AppCoordinator: ObservableObject {
     private func handleForegroundAppResult(_ result: LGResult<String>) {
         guard case .success(let appID) = result else { return }
         guard foregroundAppID != appID else { return }
+        let hadInput = !foregroundAppID.isEmpty
         foregroundAppID = appID
         updateSelectedHDMI()
+        updateMacInputSince()
+        if hadInput {
+            displayOffGate.tvInputChanged()
+        }
     }
 
     private func updateSelectedHDMI() {
@@ -1134,4 +1275,5 @@ final class AppCoordinator: ObservableObject {
 
     private static let keyboardVolumeStep = 1
     private static let sleepReadFreshness: TimeInterval = 3
+    private static let lockStandbyDelay: TimeInterval = 10
 }

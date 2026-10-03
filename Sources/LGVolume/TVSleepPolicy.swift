@@ -35,6 +35,15 @@ enum TVSleepPolicy {
         return .turnOff
     }
 
+    /// TV mode: a lock only counts once the TV has stayed on the Mac's input for this long, so
+    /// anything that happens right after an input switch never turns the TV off.
+    static let requiredStableMacInput: TimeInterval = 60
+
+    static func macInputIsStable(since: Date?, now: Date = Date(), required: TimeInterval = requiredStableMacInput) -> Bool {
+        guard let since else { return false }
+        return now.timeIntervalSince(since) >= required
+    }
+
     static func hdmiPort(forForegroundAppID appID: String, inputs: [TVExternalInput]) -> Int? {
         let lower = appID.lowercased()
         if let input = inputs.first(where: { !$0.appID.isEmpty && $0.appID.lowercased() == lower }) {
